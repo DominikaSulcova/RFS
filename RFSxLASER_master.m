@@ -239,13 +239,14 @@ for a = 1:length(params.stimulus)
 
     % clasify trials and append to output structure
     fprintf('%d valid trials found\nclassifying ...\n', length(ratings)) 
+    visual = struct;
     for c = 1:length(ratings)
         % if trial number matches
         if RFSxLASER_info(subject_idx).stimulation.laser.threshold.measures(c).trial == ratings(c).trial
             % append 
-            RFSxLASER_info(subject_idx).stimulation.laser.threshold.measures(c).time_psychopy = ratings(c).time_psychopy;
-            RFSxLASER_info(subject_idx).stimulation.laser.threshold.measures(c).descriptors = ratings(c).descriptors;
-            RFSxLASER_info(subject_idx).stimulation.laser.threshold.measures(c).pain = ratings(c).pain;
+            measures(c).time_psychopy = ratings(c).time_psychopy;
+            measures(c).descriptors = ratings(c).descriptors;
+            measures(c).pain = ratings(c).pain;
             
             % determine level of evoked sensation based on descriptors
             for d = 1:length(ratings(c).descriptors)
@@ -253,132 +254,125 @@ for a = 1:length(params.stimulus)
                 if ~isempty(index)
                     desc_int(d) = params.values(index);
                 else
-                    disp('Error: Trial %d contains an unknown descriptor.');
+                    fprintf('Error: Trial %d contains an unknown descriptor.\n', d);
                     exit()
                 end                
             end
-            RFSxLASER_info(subject_idx).stimulation.laser.threshold.measures(c).intensity = max(desc_int);
+            measures(c).sensation = max(desc_int);
             
-            % prepare visualization input
-            visual.sensation(c) = max(desc_int);
-            if visual.intensity(c) == 0
+            % prepare visualization input   
+            visual.intensity(c) = RFSxLASER_info(subject_idx).stimulation.laser.threshold.measures(c).intensity;    
+            if measures(c).sensation == 0
                 visual.color(c, :) = [0.6510    0.6510    0.6510];
-            elseif visual.intensity(c) == 1
+            elseif measures(c).sensation == 1
                 visual.color(c, :) = [0    0.4471    0.7412];
-            elseif visual.intensity(c) == 2
+            elseif measures(c).sensation == 2
                 visual.color(c, :) = [0.8000    0.0157    0.0157];
-            elseif visual.intensity(c) == 3
-                visual.color(c, :) = [0.8000    0.0157    0.0157];
+            elseif measures(c).sensation == 3
+                visual.color(c, :) = [0 0 0];
             end  
-            visual.intensity(c) = output_info(subject_idx).psychophysics.threshold_trials(c).power;    
-            
+
             % save to the output file
             save(output_file, 'RFSxLASER_info', '-append');
         end
-
-        
     end
 
-end
-
-clear a b c d file2import ratings_table desc int index desc_int
-
-
-
-
-
-
-% identify intenisity transitions
-threshold.perception = [];
-threshold.pain = [];
-for d = 2:length(ratings)
-    if intensity(d) == 1 & intensity(d-1) == 0
-        threshold.perception(end+1) = mean(power([d-1, d]));
-    elseif intensity(d) == 0 & intensity(d-1) == 1
-        threshold.perception(end+1) = mean(power([d-1, d]));
-    elseif intensity(d) == 2 & intensity(d-1) == 1
-        threshold.pain(end+1) = mean(power([d-1, d]));
-    elseif intensity(d) == 1 & intensity(d-1) == 2
-        threshold.pain(end+1) = mean(power([d-1, d]));
+    % identify transitions in sensation = thresholds
+    fprintf('identifying thresholds...\n') 
+    threshold.perception = [];
+    threshold.pain = [];
+    for e = 2:length(measures)
+        if measures(e).sensation == 1 & measures(e-1).sensation == 0
+            threshold.perception(end+1) = mean(measures([e-1, e]).intensity);
+        elseif measures(e).sensation == 0 & measures(e-1).sensation == 1
+            threshold.perception(end+1) = mean(measures([e-1, e]).intensity);
+        elseif measures(e).sensation == 2 & measures(e-1).sensation == 1
+            threshold.pain(end+1) = mean(measures([e-1, e]).intensity);
+        elseif measures(e).sensation == 1 & measures(e-1).sensation == 2
+            threshold.pain(end+1) = mean(measures([e-1, e]).intensity);
+        end
     end
-end
-output_info(subject_idx).psychophysics.threshold_perception = round(mean(threshold.perception));
-output_info(subject_idx).psychophysics.threshold_pain = round(mean(threshold.pain));
+    if strcmp(params.stimulus{a}, 'laser')
+        RFSxLASER_info(subject_idx).stimulation.laser.threshold.perception = round(mean(threshold.perception));
+        RFSxLASER_info(subject_idx).stimulation.laser.threshold.pain = round(mean(threshold.pain));
+    elseif strcmp(params.stimulus{a}, 'RFS')
+        RFSxLASER_info(subject_idx).stimulation.RFS.threshold.perception = round(mean(threshold.perception));
+        RFSxLASER_info(subject_idx).stimulation.RFS.threshold.pain = round(mean(threshold.pain));
+    end
 
-% clasify trials based on descriptors
-for c = 1:length(ratings)
-    % if trial number matches
-    if output_info(subject_idx).psychophysics.threshold_trials(c).trial == ratings(c).trial
-        % determine value of descriptors 
-        int_descriptors = [];
-        for d = 1:length(descriptors.labels)             
-            if ismember(descriptors.labels(d), output_info(subject_idx).psychophysics.threshold_trials(c).descriptors) 
-                int_descriptors(end+1) = descriptors.values(d);
+    % identify transitions in pain rating = subjective pain threshold
+    threshold.subjective = [];
+    for f = 2:length(measures)
+        if length(measures(f).pain) == 1
+            if strcmp(measures(f).pain{1}, 'yes') & strcmp(measures(f-1).pain{1}, 'no')
+                threshold.subjective(end+1) = mean(measures([f-1, f]).intensity);
+            elseif strcmp(measures(f).pain{1}, 'no') & strcmp(measures(f-1).pain{1}, 'yes')
+                threshold.subjective(end+1) = mean(measures([f-1, f]).intensity);
+            end
+        else
+            fprintf('Error: Trial %d contains invalid pain rating.\n', f);
+            exit()
+        end
+    end
+    if strcmp(params.stimulus{a}, 'laser')
+        RFSxLASER_info(subject_idx).stimulation.laser.threshold.subjective = round(mean(threshold.subjective));
+    elseif strcmp(params.stimulus{a}, 'RFS')
+        RFSxLASER_info(subject_idx).stimulation.RFS.threshold.subjective = round(mean(threshold.subjective));
+    end
+
+    % launch the figure
+    visual.x = 1:length(measures);
+    fig = figure(figure_counter);
+    set(fig, 'units','normalized','outerposition',[0 0 1 1])
+    plot_thresholds(visual, threshold)
+
+    % adjust labels
+    if strcmp(params.stimulus{a}, 'laser')
+        ylabel('laser energy (J)')
+    elseif strcmp(params.stimulus{a}, 'RFS')
+        ylabel('RFS intensity (%MSO)')
+    end
+    title(sprintf('%s: threshold tracking - %s', RFSxLASER_info(subject_idx).ID, params.stimulus{a}))
+       
+    % save figure and update counter
+    saveas(fig, sprintf('%s\\figures\\%s_threshold_%s.png', folder.output, RFSxLASER_info(subject_idx).ID, params.stimulus{a}))
+    figure_counter = figure_counter + 1;
+
+    % append measures to the info structure
+    if strcmp(params.stimulus{a}, 'laser')
+        measures_all = RFSxLASER_info(subject_idx).stimulation.laser.threshold.measures;
+        for g = 1:numel(measures)
+            fields = fieldnames(measures);  
+            for h = 1:numel(fields)
+                measures_all(g).(fields{h}) = measures(g).(fields{h});  
             end
         end
-        
-        % determine overall intensity 
-        output_info(subject_idx).psychophysics.threshold_trials(c).intensity_descriptors = max(int_descriptors);
+        RFSxLASER_info(subject_idx).stimulation.laser.threshold.measures = measures_all;
+    elseif strcmp(params.stimulus{a}, 'RFS')
+        measures_all = RFSxLASER_info(subject_idx).stimulation.RFS.threshold.measures;
+        for g = 1:numel(measures)
+            fields = fieldnames(measures);  
+            for h = 1:numel(fields)
+                measures_all(g).(fields{h}) = measures(g).(fields{h});  
+            end
+        end
+        RFSxLASER_info(subject_idx).stimulation.RFS.threshold.measures = measures_all;
     end
 end
+clear a b c d e f g h file2import ratings_table desc int index desc_int threshold measures measures_all fields visual fig
+ 
 
-% identify intenisity transitions
-intensity_descriptors = extractfield(output_info(subject_idx).psychophysics.threshold_trials, 'intensity_descriptors');
-threshold.perception = [];
-threshold.pain = [];
-for d = 2:length(intensity_descriptors)
-    if intensity_descriptors(d) == 1 && intensity_descriptors(d-1) == 0
-        threshold.perception(end+1) = mean(power([d-1, d]));
-    elseif intensity_descriptors(d) == 0 && intensity_descriptors(d-1) == 1
-        threshold.perception(end+1) = mean(power([d-1, d]));
-    elseif intensity_descriptors(d) == 2 && intensity_descriptors(d-1) == 1
-        threshold.pain(end+1) = mean(power([d-1, d]));
-    elseif intensity_descriptors(d) == 1 && intensity_descriptors(d-1) == 2
-        threshold.pain(end+1) = mean(power([d-1, d]));
-    end
-end
-output_info(subject_idx).psychophysics.threshold_perception_descriptors = round(mean(threshold.perception));
-output_info(subject_idx).psychophysics.threshold_pain_descriptors = round(mean(threshold.pain));
 
-% launch the figure
-x = 1:length(ratings);
-fig = figure(figure_counter);
-set(fig, 'units','normalized','outerposition',[0 0 1 1])
 
-% plot the line
-plot(x, power, ':', 'color', [0.6510    0.6510    0.6510], 'linewidth', 3)
-hold on
 
-% plot the trials
-for e = 1:length(ratings)
-    plot(x(e), power(e), 'o', 'MarkerSize', 12, 'MarkerEdgeColor','none','MarkerFaceColor', marker_color(e, :))
-    hold on
-end
 
-% plot thresholds
-line(x(1)-5:x(end)+1, repelem(output_info(subject_idx).psychophysics.threshold_perception, 1, length(x)+6), 'color', 'black', 'linewidth', 1.5)
-line(x(1)-5:x(end)+1, repelem(output_info(subject_idx).psychophysics.threshold_pain, 1, length(x)+6), 'color', 'black', 'linewidth', 1.5)
-line(x(1)-5:x(end)+1, repelem(output_info(subject_idx).psychophysics.threshold_perception_descriptors, 1, length(x)+6), 'color', [0.6353    0.0784    0.1843], 'linewidth', 1.5)
-line(x(1)-5:x(end)+1, repelem(output_info(subject_idx).psychophysics.threshold_pain_descriptors, 1, length(x)+6), 'color', [0.6353    0.0784    0.1843], 'linewidth', 1.5)
 
-% plot annotations
-text(x(1)-5 + 0.25, output_info(subject_idx).psychophysics.threshold_perception + 0.25, 'perception threshold', 'fontsize', 14);
-text(x(1)-5 + 0.25, output_info(subject_idx).psychophysics.threshold_pain + 0.25, 'pain threshold', 'fontsize', 14);
-text(x(1)-5 + 0.25, output_info(subject_idx).psychophysics.threshold_perception_descriptors + 0.25, 'perception threshold - descriptors', 'fontsize', 14, 'color', [0.6353    0.0784    0.1843]);
-text(x(1)-5 + 0.25, output_info(subject_idx).psychophysics.threshold_pain_descriptors + 0.25, 'pain threshold - descriptors', 'fontsize', 14, 'color', [0.6353    0.0784    0.1843]);
 
-% adjust visuals
-xlim([x(1)-5, x(end)+1]); 
-ylim([0, 1.1*max(power)])
-xlabel('trials'); ylabel('power (%MSO)')
-title(sprintf('threshold tracking - %s', output_info(subject_idx).ID))
-set(gca, 'fontsize', 14)
-    
-% save figure
-saveas(fig, sprintf('%s\\figures\\threshold_%s.png', folder.output, output_info(subject_idx).ID))
 
-% update figure counter
-figure_counter = figure_counter + 1;
+
+
+
+
 clear descriptors a b c d e int desc ratings intensity power threshold marker_color int_descriptors x fig  
 
 %% block psychophysics
@@ -769,4 +763,33 @@ for d = 1:length(dataset)
     save(sprintf('%s.lw6', dataset(d).header.name), 'header')
 end
 clear d e header
+
+%% functions
+function plot_thresholds(visual, threshold)        
+    % plot the line
+    plot(visual.x, visual.intensity, ':', 'color', [0.6510    0.6510    0.6510], 'linewidth', 3)
+    hold on
+    
+    % plot the trials
+    for e = 1:length(visual.x)
+        plot(visual.x(e), visual.intensity(e), 'o', 'MarkerSize', 12, 'MarkerEdgeColor','none','MarkerFaceColor', visual.color(e, :))
+        hold on
+    end
+    
+    % plot thresholds
+    line(visual.x(1)-5:visual.x(end)+1, repelem(round(mean(threshold.perception)), 1, length(visual.x)+6), 'color', [0.6510    0.6510    0.6510], 'linewidth', 1.5)
+    line(visual.x(1)-5:visual.x(end)+1, repelem(round(mean(threshold.pain)), 1, length(visual.x)+6), 'color', [0 0 0], 'linewidth', 1.5)
+    line(visual.x(1)-5:visual.x(end)+1, repelem(round(mean(threshold.subjective)), 1, length(visual.x)+6), 'color', [0 0 0], 'linewidth', 1.5, 'linestyle', '--')
+    
+    % plot annotations
+    text(visual.x(1)-5 + 0.25, round(mean(threshold.perception)) + 0.25, 'perception threshold', 'fontsize', 14);
+    text(visual.x(1)-5 + 0.25, round(mean(threshold.pain)) + 0.25, 'pain threshold', 'fontsize', 14);
+    text(visual.x(1)-5 + 0.25, round(mean(threshold.subjective)) + 0.25, 'subjective pain threshold', 'fontsize', 14);
+    
+    % adjust visuals
+    xlim([visual.x(1)-5, visual.x(end)+1]); 
+    ylim([0, 1.1*max(visual.intensity)])
+    xlabel('trials'); ylabel('stimulation intensity')
+    set(gca, 'fontsize', 14)
+end
 
