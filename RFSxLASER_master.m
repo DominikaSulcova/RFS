@@ -226,8 +226,8 @@ for s = 1:length(params.stimulus)
                
             % open the figure
             if plot_fig
-                screenSize = get(0, 'ScreenSize');
-                fig_intensity = figure('Position', [1, screenSize(4)/2, screenSize(3) / 2, screenSize(4) / 2], ...
+                screen_size = get(0, 'ScreenSize');
+                fig_intensity = figure('Position', [1, screen_size(4)/2, screen_size(3) / 2, screen_size(4) / 2], ...
                               'MenuBar', 'none', ...
                               'NumberTitle', 'off', ...
                               'Color', [1 1 1]); 
@@ -287,7 +287,7 @@ end
 
 % save to the output file
 save(output_file, 'RFSxLASER_info', '-append');
-clear params s a intensity trial_counter continue_trials trial statement open screenSize ...
+clear params s a intensity trial_counter continue_trials trial statement open screen_size ...
     intensity_input fig_intensity plot_fig change_tracker flip_counter
 
 %% 3) determine thresholds 
@@ -296,6 +296,7 @@ params.stimulus = {'laser', 'RFS'};
 params.side = {'right', 'left'};
 params.labels = {'nothing' 'warm' 'touch' 'pricking' 'burning' 'electric'};
 params.values = [0 1 1 2 2 3];
+params.folder = 'PsychoPy_threshold';
 % -------------------------
 
 % ask for subject number, if not defined
@@ -333,11 +334,10 @@ for s = 1:length(params.stimulus)
     
         % import PsychoPy .csv file
         fprintf('importing PsychoPy data...\n')
-        file2import = dir(sprintf('%s\\%s\\threshold\\*_%s*%s*.csv', folder.raw, RFSxLASER_info(subject_idx).ID, params.stimulus{s}, params.area));
+        file2import = dir(sprintf('%s\\%s\\%s\\*_%s*%s*.csv', folder.raw, RFSxLASER_info(subject_idx).ID, params.folder, params.stimulus{s}, params.area));
         % file2import = dir(sprintf('%s\\*%s*_%s*%s*.csv', folder.raw, RFSxLASER_info(subject_idx).ID, params.stimulus{s}, params.area));
         if size(file2import, 1) ~= 1
-            fprintf('ERROR: %d files attributed %s thresholding on the %s hand were found!\n', size(file2import, 1), params.stimulus{s}, params.side{a})
-            return;
+            error('ERROR: %d files attributed %s thresholding on the %s hand were found!\n', size(file2import, 1), params.stimulus{s}, params.side{a})
         end
         option = detectImportOptions(sprintf('%s\\%s', file2import.folder, file2import.name));
         option.SelectedVariableNames = {'trial', 'fixation_stopped', 'descriptor', 'pain'};
@@ -371,8 +371,7 @@ for s = 1:length(params.stimulus)
         statement = sprintf('n_trials = length(RFSxLASER_info(subject_idx).stimulation.%s.threshold.%s.measures);', params.stimulus{s}, params.side{a});
         eval(statement)
         if n_trials ~= length(ratings)
-            fprintf('ERROR: PsychoPy trials do not match MATLAB trials!\n')
-            exit()
+            error('ERROR: PsychoPy trials do not match MATLAB trials!\n')
         end
     
         % clasify trials and append to output structure
@@ -386,8 +385,7 @@ for s = 1:length(params.stimulus)
                 if ~isempty(index)
                     desc_int(d) = params.values(index);
                 else
-                    fprintf('Error: Trial %d contains an unknown descriptor.\n', d);
-                    exit()
+                    error('ERROR: Trial %d contains an unknown descriptor.\n', d);
                 end                
             end
             ratings(c).sensation = max(desc_int);
@@ -435,8 +433,7 @@ for s = 1:length(params.stimulus)
                     threshold.subjective(end+1) = mean(visual.intensity([f-1, f]));
                 end
             else
-                fprintf('Error: Trial %d contains invalid pain rating.\n', f);
-                exit()
+                error('ERROR: Trial %d contains invalid pain rating.\n', f);
             end
         end
 
@@ -515,13 +512,18 @@ figure_counter = 1;
 load handel.mat
 haleluja = y; clear y Fs
 
-%% 1) import data for letswave
+%% 1) import data for letswave, preview
 % ----- section input -----
 params.data = {'RS', 'LEP', 'RFS'};
+params.folder = 'EEG';
 params.data_n = 4;
-param.suffix = {'preview'};
-param.eventcode = {'S  1', 'S  2'};
-param.epoch = [-0.3 1];
+params.event_n = 30;
+params.downsample = 5;
+params.eventcode = {'S  1', 'S  2'};
+params.epoch = [-0.3 1];
+params.suffix = 'preview';
+params.eoi = 'Cz';
+params.ylim = [-15 15];
 % -------------------------
 % ask for subject number, if not defined
 if ~exist('subject_idx')
@@ -537,14 +539,14 @@ clear prompt dlgtitle dims definput input
 % update the info structure
 load(output_file, 'RFSxLASER_info');
 
-% add letswave 6 to the top of search path
-addpath(genpath([folder.toolbox '\letswave 6']));
-    
+% add letswave 7 to the top of search path
+addpath(genpath([folder.toolbox '\letswave 7']));
+   
 % cycle though datasets
 fprintf('Loading:\n')
 for a = 1:length(params.data)
     % identify the appropriate files
-    file2import = dir(sprintf('%s\\%s\\*%s*%s*.vhdr', folder.raw, RFSxLASER_info(subject_idx).ID, study, params.data{a}));
+    file2import = dir(sprintf('%s\\%s\\%s\\*%s*%s*.vhdr', folder.raw, RFSxLASER_info(subject_idx).ID, params.folder, study, params.data{a}));
 
     % remove average files if necessary
     for b = 1:length(file2import)
@@ -558,46 +560,191 @@ for a = 1:length(params.data)
     
     % check that the number of files matches
     if size(file2import, 1) ~= params.data_n
-        fprintf('ERROR: incorrect number (%d) of %s recordings was found!\n', size(file2import, 1), params.data{a})
-        return;
+        error('ERROR: incorrect number (%d) of %s recordings was found!\n', size(file2import, 1), params.data{a})
     end
 
     % cycle through datasets
-    for b = 1:length(file2import)
-        % identify dataset names
-        filename = sprintf('%s\\%s', file2import(b).folder, file2import(b).name);
-        dataname = file2import(b).name([11:end-8]);
+    for c = 1:length(file2import)
+        % identify the filename
+        filename = sprintf('%s\\%s', file2import(c).folder, file2import(c).name);
+        
+        % prepare the dataset name
+        dataname = replace(file2import(c).name, ' ', '');
+        underscores = strfind(dataname, '_');
+        dataname = dataname(underscores(1) + 1 : underscores(end) - 1);
         dataname = replace(dataname, '_', ' ');
-        if strcmp(dataname(end), ' ')
-            dataname(end) = [];
+        if contains(dataname, 'LEP')
+            dataname = replace(dataname, 'LEP', 'laser');
         end
-    
+
         % provide update
         fprintf('%s ...\n', dataname)
         
         % encode the filename to metadata
-        block = regexp(file2import(b).name, 'b(\d+)', 'tokens');
+        block = regexp(file2import(c).name, 'b(\d+)', 'tokens');
         block = str2num(block{1}{1});
         RFSxLASER_info(subject_idx).dataset(block - 1).block = block;
-        RFSxLASER_info(subject_idx).dataset(block - 1).name = file2import(b).name;
+        RFSxLASER_info(subject_idx).dataset(block - 1).name = file2import(c).name;
     
         % import the dataset
-        [dataset(block - 1).header, dataset(block - 1).data, ~] = RLW_import_VHDR(filename);
+        [dataset(subject_idx).raw(block - 1).header, dataset(subject_idx).raw(block - 1).data, ~] = RLW_import_VHDR(filename);
     
         % rename in the header
-        dataset(block - 1).header.name = dataname;
+        dataset(subject_idx).raw(block - 1).header.name = dataname;
     end
 end
 fprintf('Done.\n')
 
+% save info to the output file
+save(output_file, 'RFSxLASER_info', '-append');
+
+% go to data folder
+cd(folder.processed)
+
 % save average ERPs for letswave preview
-for c = 1:length(params.eventcode)
-    if     
+fprintf('Pre-processing ERPs for letswave preview:\n')
+for d = 1:length(dataset(subject_idx).raw)
+    if ~isempty(strfind(dataset(subject_idx).raw(d).header.name, 'RS'))
+    else 
+        % provide update
+        fprintf('%s ...\n', dataset(subject_idx).raw(d).header.name)
+
+        % verify the number and type of triggers
+        events = {dataset(subject_idx).raw(d).header.events.code};
+        event_n = 0;
+        for e = 1:length(events)
+            if strcmp(events{e}, params.eventcode{1}) || strcmp(events{e}, params.eventcode{2})
+                event_n = event_n + 1;
+            end
+        end
+        if event_n ~= params.event_n
+            fprintf('ATTENTION: incorrect number of events (%d) were found!\n', event_n)
+        end
+
+        % select the data
+        lwdata.header = dataset(subject_idx).raw(d).header;
+        lwdata.data = dataset(subject_idx).raw(d).data;
+
+        % downsample
+        option = struct('x_dsratio', params.downsample, 'suffix', '', 'is_save',0);
+        lwdata = FLW_downsample.get_lwdata(lwdata, option);
+
+        % segment
+        if contains(dataset(subject_idx).raw(d).header.name, 'laser')
+            event_code = params.eventcode{1};
+        elseif contains(dataset(subject_idx).raw(d).header.name, 'RFS')
+            event_code = params.eventcode{2};
+        end
+        option = struct('event_labels', {event_code}, 'x_start', params.epoch(1), 'x_end', params.epoch(2), ...
+            'x_duration', params.epoch(2)-params.epoch(1), 'suffix', '', 'is_save', 0);
+        lwdata = FLW_segmentation.get_lwdata(lwdata, option);
+    
+        % remove DC + linear detrend
+        option = struct('linear_detrend', 1, 'suffix', params.suffix, 'is_save', 1);
+        lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
+
+        % append to the dataset
+        dataset(subject_idx).preview(d).header = lwdata.header;
+        dataset(subject_idx).preview(d).data = lwdata.data;
+    end    
+end
+dataset(subject_idx).preview([1, 2]) = [];       % remove empty rows
+
+% add fieldtrip to the top of search path
+addpath(genpath([folder.toolbox '\fieldtrip']));
+
+% determine electrode to plot
+eoi = find(strcmp({dataset(subject_idx).preview(1).header.chanlocs.labels}, params.eoi));
+
+% plot preview
+fig = figure(figure_counter);
+screen_size = get(0, 'ScreenSize');
+set(fig, 'Position', screen_size);
+figure_counter = figure_counter + 1;
+for f = 1:length(dataset(subject_idx).preview)
+    % select data
+    data_visual = squeeze(dataset(subject_idx).preview(f).data);
+
+    % prepare fieldtrip input 
+    data = [];
+    data.label = {dataset(subject_idx).preview(f).header.chanlocs.labels};
+    data.fsample = 1/dataset(subject_idx).preview(f).header.xstep;
+    data.time = {params.epoch(1) : dataset(subject_idx).preview(f).header.xstep : params.epoch(2) - dataset(subject_idx).preview(f).header.xstep};  
+    data.trial = {squeeze(mean(data_visual, 1))}; 
+
+    % define the layout 
+    cfg = [];
+    cfg.layout = 'acticap-64ch-standard2';
+    cfg.viewmode = 'vertical'; 
+    cfg.showlabels = 'yes';  
+    cfg.channel = 'all';  
+    cfg.ylim = params.ylim;
+
+    % plot all channels
+    figure(figure_counter)
+    ft_multiplotER(cfg, data);
+    set(gcf, 'Position', screen_size);
+    set(gcf, 'Name', dataset(subject_idx).preview(f).header.name);
+
+    % determine subplot
+    if contains(dataset(subject_idx).preview(f).header.name, 'laser')
+        a = 0;
+        fig_name = 'laser';
+    else
+        a = 4;
+        fig_name = 'RFS';
+    end
+    if contains(dataset(subject_idx).preview(f).header.name, 'left')
+        b = 0;
+        fig_name = [fig_name ' left'];
+    else
+        b = 2;
+        fig_name = [fig_name ' right'];
+    end
+    if contains(dataset(subject_idx).preview(f).header.name, 'high')
+        c = 1;
+        fig_name = [fig_name ' high'];
+    else
+        c = 2;
+        fig_name = [fig_name ' low'];
+    end
+
+    % plot 
+    figure(fig)
+    subplot(2, 4, a + b + c)
+    for d = 1:size(data_visual, 1)
+        plot(data.time{1}, squeeze(data_visual(d, eoi, :)), "Color", [0.6471    0.8784    0.9804], "LineWidth", 1.1)
+        hold on
+    end
+    plot(data.time{1}, squeeze(mean(data_visual(:, eoi, :), 1)), "Color", [0.0941    0.5059    0.7804], "LineWidth", 3)
+    line([0, 0], params.ylim, 'Color', 'black', 'LineWidth', 2, 'LineStyle', '--')   
+    title(fig_name)
+    ylim(params.ylim)
+    xlim([data.time{1}(1) data.time{1}(end)])
+    set(gca, 'fontsize', 14)
+    ylabel('amplitude (\muV)')
+    xlabel('time (s)')
+    set(gca, 'Layer', 'Top')
+    set(gca, 'YDir', 'reverse');
+
+    % update figure counter 
+    figure_counter = figure_counter + 1;
 end
 
-% save to the output file
-save(output_file, 'RFSxLASER_info', '-append');
-clear params a b d block file2import file2rmv filename dataname
+% adjust and save output figure
+figure(fig)
+sgtitle(sprintf('%s: ERP preview - %s electrode', RFSxLASER_info(subject_idx).ID, params.eoi))
+saveas(fig, sprintf('%s\\figures\\%s_preview.png', folder.output, RFSxLASER_info(subject_idx).ID))
+
+% ask if the subject is done
+answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to the next subject?', 'YES', 'NO', 'NO'); 
+switch answer
+    case 'NO'
+    case 'YES'
+    	subject_idx = subject_idx + 1;
+end 
+clear params a b c d e f block file2import file2rmv filename dataname underscores events event_n event_code lwdata ...
+    data data_visual cfg eoi fig fig_name option screen_size
 
 %% 2) interpolate RF artifact
 
