@@ -44,10 +44,9 @@
 clc, clear all
 
 % directories
-folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % toolboxes
+folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % MATLAB toolboxes
 folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
-folder.processed = uigetdir(pwd, 'Choose the data folder');     % processed data --> wherever you want to store the voluminous EEG data
-folder.output = uigetdir(pwd, 'Choose the OneDrive folder');    % output folder --> figures, loutput file, exports 
+folder.output = uigetdir(pwd, 'Choose the OneDrive folder');    % output folder --> One Drive: figures, loutput file, exports 
 cd(folder.output)
 
 % output
@@ -492,21 +491,29 @@ switch answer
 end 
 clear params a b c d e f g h s file2import ratings_table desc int index desc_int threshold measures_all fields visual fig n_trials statement ratings 
 
-%% ===================== PART 2: single subject processing ================
+%% ===================== PART 2: single subject data processing ================
 % params
 clc, clear all
 
 % directories
-folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % toolboxes
-folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
+if ~exist('folder.toolbox') 
+    folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % MATLAB toolboxes
+end
+if ~exist('folder.raw') 
+    folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
+end
+if ~exist('folder.output')  
+    folder.output = uigetdir(pwd, 'Choose the OneDrive folder');    % output folder --> figures, loutput file, exports 
+end
 folder.processed = uigetdir(pwd, 'Choose the data folder');     % processed data --> wherever you want to store the voluminous EEG data
-folder.output = uigetdir(pwd, 'Choose the OneDrive folder');    % output folder --> figures, loutput file, exports 
-cd(folder.output)
+cd(folder.processed)
 
 % output
 study = 'RFSxLASER';
 output_file = sprintf('%s\\%s_output.mat', folder.output, study);
-figure_counter = 1;
+if ~exist('figure_counter')  
+    figure_counter = 1;
+end
 
 % sound
 load handel.mat
@@ -535,6 +542,15 @@ if ~exist('subject_idx')
     subject_idx = str2num(input{1,1});
 end
 clear prompt dlgtitle dims definput input
+
+% ask if preview data should be saved
+answer = questdlg(sprintf('Do you want to save pre-processed data for a further preview in letswave?'), 'Save preview data?', 'YES', 'NO', 'YES'); 
+switch answer
+    case 'NO'
+        preview_save = 0;
+    case 'YES'
+    	preview_save = 1;
+end 
 
 % update the info structure
 load(output_file, 'RFSxLASER_info');
@@ -598,11 +614,8 @@ fprintf('Done.\n')
 % save info to the output file
 save(output_file, 'RFSxLASER_info', '-append');
 
-% go to data folder
-cd(folder.processed)
-
-% save average ERPs for letswave preview
-fprintf('Pre-processing ERPs for letswave preview:\n')
+% pre-process ERPs for preview and save for letswave if required
+fprintf('Pre-processing ERPs for preview:\n')
 for d = 1:length(dataset(subject_idx).raw)
     if ~isempty(strfind(dataset(subject_idx).raw(d).header.name, 'RS'))
     else 
@@ -640,7 +653,7 @@ for d = 1:length(dataset(subject_idx).raw)
         lwdata = FLW_segmentation.get_lwdata(lwdata, option);
     
         % remove DC + linear detrend
-        option = struct('linear_detrend', 1, 'suffix', params.suffix, 'is_save', 1);
+        option = struct('linear_detrend', 1, 'suffix', params.suffix, 'is_save', preview_save);
         lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
 
         % append to the dataset
@@ -737,14 +750,28 @@ sgtitle(sprintf('%s: ERP preview - %s electrode', RFSxLASER_info(subject_idx).ID
 saveas(fig, sprintf('%s\\figures\\%s_preview.png', folder.output, RFSxLASER_info(subject_idx).ID))
 
 % ask if the subject is done
-answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to the next subject?', 'YES', 'NO', 'NO'); 
+answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
 switch answer
     case 'NO'
     case 'YES'
     	subject_idx = subject_idx + 1;
 end 
+
+% ask if the raw data should be saved in letswave format
+answer = questdlg(sprintf('Should I save the raw data of subject %d in the letswave format?', subject_idx), 'Save the data?', 'YES', 'NO', 'NO'); 
+switch answer
+    case 'NO'
+    case 'YES'
+        % save raw data to the output folder
+	    for d = 1:length(length(dataset(subject_idx).raw))
+            data = dataset(subject_idx).raw(d).data;
+            header = dataset(subject_idx).raw(d).header;
+            save(sprintf('%s.mat', subject_idx.raw(d).header.name), 'data');
+            save(sprintf('%s.lw6', subject_idx.raw(d).header.name), 'header');
+        end
+end 
 clear params a b c d e f block file2import file2rmv filename dataname underscores events event_n event_code lwdata ...
-    data data_visual cfg eoi fig fig_name option screen_size
+    data data_visual cfg eoi fig fig_name option screen_size answer
 
 %% 2) interpolate RF artifact
 
