@@ -345,6 +345,7 @@ for s = 1:length(params.stimulus)
     
         % adjust ratings format
         fprintf('extracting trials...\n')
+        ratings = struct([]);
         for b = 1:height(ratings_table)
             % if it is a valid trial
             if ~isnan(ratings_table{b, 1})
@@ -492,21 +493,14 @@ end
 clear params a b c d e f g h s file2import ratings_table desc int index desc_int threshold measures_all fields visual fig n_trials statement ratings 
 
 %% ===================== PART 2: single subject data processing ================
-% params
-clc, clear all
-
 % directories
-if ~exist('folder.toolbox') 
+if ~exist('folder') 
     folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % MATLAB toolboxes
-end
-if ~exist('folder.raw') 
     folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
-end
-if ~exist('folder.output')  
     folder.output = uigetdir(pwd, 'Choose the OneDrive folder');    % output folder --> figures, loutput file, exports 
 end
 folder.processed = uigetdir(pwd, 'Choose the data folder');     % processed data --> wherever you want to store the voluminous EEG data
-cd(folder.processed)
+cd(folder.output)
 
 % output
 study = 'RFSxLASER';
@@ -771,7 +765,7 @@ switch answer
         end
 end 
 clear params a b c d e f block file2import file2rmv filename dataname underscores events event_n event_code lwdata ...
-    data data_visual cfg eoi fig fig_name option screen_size answer
+    data data_visual cfg eoi fig fig_name option screen_size answer preview_save
 
 %% 2) interpolate RF artifact
 
