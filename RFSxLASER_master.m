@@ -516,6 +516,7 @@ haleluja = y; clear y Fs
 %% 1) import data for letswave, preview
 % ----- section input -----
 params.data = {'RS', 'LEP', 'RFS'};
+params.preview = true;
 params.folder = 'EEG';
 params.data_n = 4;
 params.event_n = 30;
@@ -537,22 +538,13 @@ if ~exist('subject_idx')
 end
 clear prompt dlgtitle dims definput input
 
-% ask if preview data should be saved
-answer = questdlg(sprintf('Do you want to save pre-processed data for a further preview in letswave?'), 'Save preview data?', 'YES', 'NO', 'YES'); 
-switch answer
-    case 'NO'
-        preview_save = 0;
-    case 'YES'
-    	preview_save = 1;
-end 
-
 % update the info structure
 load(output_file, 'RFSxLASER_info');
 
-% add letswave 7 to the top of search path
-addpath(genpath([folder.toolbox '\letswave 7']));
+% add letswave 6 to the top of search path
+addpath(genpath([folder.toolbox '\letswave 6']));
    
-% cycle though datasets
+% cycle though datasets and import in letswave format
 fprintf('Loading:\n')
 for a = 1:length(params.data)
     % identify the appropriate files
@@ -608,149 +600,6 @@ fprintf('Done.\n')
 % save info to the output file
 save(output_file, 'RFSxLASER_info', '-append');
 
-% pre-process ERPs for preview and save for letswave if required
-fprintf('Pre-processing ERPs for preview:\n')
-for d = 1:length(dataset(subject_idx).raw)
-    if ~isempty(strfind(dataset(subject_idx).raw(d).header.name, 'RS'))
-    else 
-        % provide update
-        fprintf('%s ...\n', dataset(subject_idx).raw(d).header.name)
-
-        % verify the number and type of triggers
-        events = {dataset(subject_idx).raw(d).header.events.code};
-        event_n = 0;
-        for e = 1:length(events)
-            if strcmp(events{e}, params.eventcode{1}) || strcmp(events{e}, params.eventcode{2})
-                event_n = event_n + 1;
-            end
-        end
-        if event_n ~= params.event_n
-            fprintf('ATTENTION: incorrect number of events (%d) were found!\n', event_n)
-        end
-
-        % select the data
-        lwdata.header = dataset(subject_idx).raw(d).header;
-        lwdata.data = dataset(subject_idx).raw(d).data;
-
-        % downsample
-        option = struct('x_dsratio', params.downsample, 'suffix', '', 'is_save',0);
-        lwdata = FLW_downsample.get_lwdata(lwdata, option);
-
-        % segment
-        if contains(dataset(subject_idx).raw(d).header.name, 'laser')
-            event_code = params.eventcode{1};
-        elseif contains(dataset(subject_idx).raw(d).header.name, 'RFS')
-            event_code = params.eventcode{2};
-        end
-        option = struct('event_labels', {event_code}, 'x_start', params.epoch(1), 'x_end', params.epoch(2), ...
-            'x_duration', params.epoch(2)-params.epoch(1), 'suffix', '', 'is_save', 0);
-        lwdata = FLW_segmentation.get_lwdata(lwdata, option);
-    
-        % remove DC + linear detrend
-        option = struct('linear_detrend', 1, 'suffix', params.suffix, 'is_save', preview_save);
-        lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
-
-        % append to the dataset
-        dataset(subject_idx).preview(d).header = lwdata.header;
-        dataset(subject_idx).preview(d).data = lwdata.data;
-    end    
-end
-dataset(subject_idx).preview([1, 2]) = [];       % remove empty rows
-
-% add fieldtrip to the top of search path
-addpath(genpath([folder.toolbox '\fieldtrip']));
-
-% determine electrode to plot
-eoi = find(strcmp({dataset(subject_idx).preview(1).header.chanlocs.labels}, params.eoi));
-
-% plot preview
-fig = figure(figure_counter);
-screen_size = get(0, 'ScreenSize');
-set(fig, 'Position', screen_size);
-figure_counter = figure_counter + 1;
-for f = 1:length(dataset(subject_idx).preview)
-    % select data
-    data_visual = squeeze(dataset(subject_idx).preview(f).data);
-
-    % prepare fieldtrip input 
-    data = [];
-    data.label = {dataset(subject_idx).preview(f).header.chanlocs.labels};
-    data.fsample = 1/dataset(subject_idx).preview(f).header.xstep;
-    data.time = {params.epoch(1) : dataset(subject_idx).preview(f).header.xstep : params.epoch(2) - dataset(subject_idx).preview(f).header.xstep};  
-    data.trial = {squeeze(mean(data_visual, 1))}; 
-
-    % define the layout 
-    cfg = [];
-    cfg.layout = 'acticap-64ch-standard2';
-    cfg.viewmode = 'vertical'; 
-    cfg.showlabels = 'yes';  
-    cfg.channel = 'all';  
-    cfg.ylim = params.ylim;
-
-    % plot all channels
-    figure(figure_counter)
-    ft_multiplotER(cfg, data);
-    set(gcf, 'Position', screen_size);
-    set(gcf, 'Name', dataset(subject_idx).preview(f).header.name);
-
-    % determine subplot
-    if contains(dataset(subject_idx).preview(f).header.name, 'laser')
-        a = 0;
-        fig_name = 'laser';
-    else
-        a = 4;
-        fig_name = 'RFS';
-    end
-    if contains(dataset(subject_idx).preview(f).header.name, 'left')
-        b = 0;
-        fig_name = [fig_name ' left'];
-    else
-        b = 2;
-        fig_name = [fig_name ' right'];
-    end
-    if contains(dataset(subject_idx).preview(f).header.name, 'high')
-        c = 1;
-        fig_name = [fig_name ' high'];
-    else
-        c = 2;
-        fig_name = [fig_name ' low'];
-    end
-
-    % plot 
-    figure(fig)
-    subplot(2, 4, a + b + c)
-    for d = 1:size(data_visual, 1)
-        plot(data.time{1}, squeeze(data_visual(d, eoi, :)), "Color", [0.6471    0.8784    0.9804], "LineWidth", 1.1)
-        hold on
-    end
-    plot(data.time{1}, squeeze(mean(data_visual(:, eoi, :), 1)), "Color", [0.0941    0.5059    0.7804], "LineWidth", 3)
-    line([0, 0], params.ylim, 'Color', 'black', 'LineWidth', 2, 'LineStyle', '--')   
-    title(fig_name)
-    ylim(params.ylim)
-    xlim([data.time{1}(1) data.time{1}(end)])
-    set(gca, 'fontsize', 14)
-    ylabel('amplitude (\muV)')
-    xlabel('time (s)')
-    set(gca, 'Layer', 'Top')
-    set(gca, 'YDir', 'reverse');
-
-    % update figure counter 
-    figure_counter = figure_counter + 1;
-end
-
-% adjust and save output figure
-figure(fig)
-sgtitle(sprintf('%s: ERP preview - %s electrode', RFSxLASER_info(subject_idx).ID, params.eoi))
-saveas(fig, sprintf('%s\\figures\\%s_preview.png', folder.output, RFSxLASER_info(subject_idx).ID))
-
-% ask if the subject is done
-answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
-switch answer
-    case 'NO'
-    case 'YES'
-    	subject_idx = subject_idx + 1;
-end 
-
 % ask if the raw data should be saved in letswave format
 answer = questdlg(sprintf('Should I save the raw data of subject %d in the letswave format?', subject_idx), 'Save the data?', 'YES', 'NO', 'NO'); 
 switch answer
@@ -764,11 +613,375 @@ switch answer
             save(sprintf('%s.lw6', subject_idx.raw(d).header.name), 'header');
         end
 end 
+
+% add letswave 7 to the top of search path
+addpath(genpath([folder.toolbox '\letswave 7']));
+   
+if params.preview
+    % ask if the data should be roughly pre-processed and saved for preview
+    answer = questdlg(sprintf('Do you want to save pre-processed data for a preview in letswave?'), 'Save preview data?', 'YES', 'NO', 'YES'); 
+    switch answer
+        case 'NO'
+            preview_save = 0;
+        case 'YES'
+    	    preview_save = 1;
+    end 
+    
+    % pre-process ERPs for preview and save for letswave if required
+    fprintf('Pre-processing ERPs for preview:\n')
+    for d = 1:length(dataset(subject_idx).raw)
+        if ~isempty(strfind(dataset(subject_idx).raw(d).header.name, 'RS'))
+        else 
+            % provide update
+            fprintf('%s ...\n', dataset(subject_idx).raw(d).header.name)
+    
+            % verify the number and type of triggers
+            events = {dataset(subject_idx).raw(d).header.events.code};
+            event_n = 0;
+            for e = 1:length(events)
+                if strcmp(events{e}, params.eventcode{1}) || strcmp(events{e}, params.eventcode{2})
+                    event_n = event_n + 1;
+                end
+            end
+            if event_n ~= params.event_n
+                fprintf('ATTENTION: incorrect number of events (%d) were found!\n', event_n)
+            end
+    
+            % select the data
+            lwdata.header = dataset(subject_idx).raw(d).header;
+            lwdata.data = dataset(subject_idx).raw(d).data;
+    
+            % downsample
+            option = struct('x_dsratio', params.downsample, 'suffix', '', 'is_save',0);
+            lwdata = FLW_downsample.get_lwdata(lwdata, option);
+    
+            % segment
+            if contains(dataset(subject_idx).raw(d).header.name, 'laser')
+                event_code = params.eventcode{1};
+            elseif contains(dataset(subject_idx).raw(d).header.name, 'RFS')
+                event_code = params.eventcode{2};
+            end
+            option = struct('event_labels', {event_code}, 'x_start', params.epoch(1), 'x_end', params.epoch(2), ...
+                'x_duration', params.epoch(2)-params.epoch(1), 'suffix', '', 'is_save', 0);
+            lwdata = FLW_segmentation.get_lwdata(lwdata, option);
+        
+            % remove DC + linear detrend
+            option = struct('linear_detrend', 1, 'suffix', params.suffix, 'is_save', preview_save);
+            lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
+    
+            % append to the dataset
+            dataset(subject_idx).preview(d).header = lwdata.header;
+            dataset(subject_idx).preview(d).data = lwdata.data;
+        end    
+    end
+    dataset(subject_idx).preview([1, 2]) = [];       % remove empty rows
+    
+    % add fieldtrip to the top of search path
+    addpath(genpath([folder.toolbox '\fieldtrip']));
+    
+    % determine electrode to plot
+    eoi = find(strcmp({dataset(subject_idx).preview(1).header.chanlocs.labels}, params.eoi));
+    
+    % plot preview
+    fig = figure(figure_counter);
+    screen_size = get(0, 'ScreenSize');
+    set(fig, 'Position', screen_size);
+    figure_counter = figure_counter + 1;
+    for f = 1:length(dataset(subject_idx).preview)
+        % select data
+        data_visual = squeeze(dataset(subject_idx).preview(f).data);
+    
+        % prepare fieldtrip input 
+        data = [];
+        data.label = {dataset(subject_idx).preview(f).header.chanlocs.labels};
+        data.fsample = 1/dataset(subject_idx).preview(f).header.xstep;
+        data.time = {params.epoch(1) : dataset(subject_idx).preview(f).header.xstep : params.epoch(2) - dataset(subject_idx).preview(f).header.xstep};  
+        data.trial = {squeeze(mean(data_visual, 1))}; 
+    
+        % define the layout 
+        cfg = [];
+        cfg.layout = 'acticap-64ch-standard2';
+        cfg.viewmode = 'vertical'; 
+        cfg.showlabels = 'yes';  
+        cfg.channel = 'all';  
+        cfg.ylim = params.ylim;
+    
+        % plot all channels
+        figure(figure_counter)
+        ft_multiplotER(cfg, data);
+        set(gcf, 'Position', screen_size);
+        set(gcf, 'Name', dataset(subject_idx).preview(f).header.name);
+    
+        % determine subplot
+        if contains(dataset(subject_idx).preview(f).header.name, 'laser')
+            a = 0;
+            fig_name = 'laser';
+        else
+            a = 4;
+            fig_name = 'RFS';
+        end
+        if contains(dataset(subject_idx).preview(f).header.name, 'left')
+            b = 0;
+            fig_name = [fig_name ' left'];
+        else
+            b = 2;
+            fig_name = [fig_name ' right'];
+        end
+        if contains(dataset(subject_idx).preview(f).header.name, 'high')
+            c = 1;
+            fig_name = [fig_name ' high'];
+        else
+            c = 2;
+            fig_name = [fig_name ' low'];
+        end
+    
+        % plot 
+        figure(fig)
+        subplot(2, 4, a + b + c)
+        for d = 1:size(data_visual, 1)
+            plot(data.time{1}, squeeze(data_visual(d, eoi, :)), "Color", [0.6471    0.8784    0.9804], "LineWidth", 1.1)
+            hold on
+        end
+        plot(data.time{1}, squeeze(mean(data_visual(:, eoi, :), 1)), "Color", [0.0941    0.5059    0.7804], "LineWidth", 3)
+        line([0, 0], params.ylim, 'Color', 'black', 'LineWidth', 2, 'LineStyle', '--')   
+        title(fig_name)
+        ylim(params.ylim)
+        xlim([data.time{1}(1) data.time{1}(end)])
+        set(gca, 'fontsize', 14)
+        ylabel('amplitude (\muV)')
+        xlabel('time (s)')
+        set(gca, 'Layer', 'Top')
+        set(gca, 'YDir', 'reverse');
+    
+        % update figure counter 
+        figure_counter = figure_counter + 1;
+    end
+    
+    % adjust and save output figure
+    figure(fig)
+    sgtitle(sprintf('%s: ERP preview - %s electrode', RFSxLASER_info(subject_idx).ID, params.eoi))
+    saveas(fig, sprintf('%s\\figures\\%s_preview.png', folder.output, RFSxLASER_info(subject_idx).ID))
+end
+
+% ask if the subject is done
+answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
+switch answer
+    case 'NO'
+    case 'YES'
+    	subject_idx = subject_idx + 1;
+end 
+
 clear params a b c d e f block file2import file2rmv filename dataname underscores events event_n event_code lwdata ...
     data data_visual cfg eoi fig fig_name option screen_size answer preview_save
 
-%% 2) interpolate RF artifact
+%% 2) pre-process 
+% ----- section input -----
+params.suffix = {'dc' 'bandpass' 'notch' 'ds'};
+params.eventcode = {'S  1', 'S  2'};
+params.eventcode_new = {'laser', 'RFS'};
+params.interpolate = [-0.002 0.02];
+params.shift = 0.002;
+params.event_n = 30;
+params.bandpass = [0.1 80];
+params.downsample = 2;
+params.epoch = [-0.3 1];
+% -------------------------
+% % update the info structure
+% load(output_file, 'RFSxLASER_info');
 
+% ask for subject number, if not defined
+if ~exist('subject_idx')
+    prompt = {'subject number:'};
+    dlgtitle = 'subject';
+    dims = [1 40];
+    definput = {''};
+    input = inputdlg(prompt,dlgtitle,dims,definput);
+    subject_idx = str2num(input{1,1});
+end
+clear prompt dlgtitle dims definput input
+
+% add letswave 6 to the top of search path
+addpath(genpath([folder.toolbox '\letswave 6']));
+
+% launch check figure
+fig = figure(figure_counter);
+set(fig, 'Position', [50, 30, 750, 750])
+visual = struct([]);
+visual.x = -0.01 : dataset(subject_idx).raw(1).header.xstep : 0.03;
+
+% interpolate RFS artifact and shift
+fprintf('*********** Subject %d: interpolating RF artifact ***********\n', subject_idx)
+d_rsf = 1;      % dataset counter
+for d = 1:length(dataset(subject_idx).raw)
+    if contains(dataset(subject_idx).raw(d).header.name, 'RFS')  
+        % provide update
+        fprintf('%s ...', dataset(subject_idx).raw(d).header.name(10:end))
+
+        % interpolate signal around the RF artifact --> cubic interpolation
+        [dataset(subject_idx).interpolated(d_rsf).header, dataset(subject_idx).interpolated(d_rsf).data, ~] = RLW_suppress_artifact_event(dataset(subject_idx).raw(d).header, dataset(subject_idx).raw(d).data,... 
+            'xstart', params.interpolate(1), 'xend', params.interpolate(2), 'event_code', params.eventcode{2}, 'interp_method', 'pchip');
+
+        % shift data by trigger duration
+        shift_samples = round(params.shift / dataset(subject_idx).interpolated(d_rsf).header.xstep); 
+        for c = 1:size(dataset(subject_idx).interpolated(d_rsf).data, 2)
+            dataset(subject_idx).interpolated(d_rsf).data(1, c, 1, 1, 1, 1:end-shift_samples) = dataset(subject_idx).interpolated(d_rsf).data(1, c, 1, 1, 1, 1 + shift_samples:end);
+        end
+
+        % extract data for visualization --> Cz electrode, first trigger
+        trigger = round(dataset(subject_idx).interpolated(d_rsf).header.events(2).latency / dataset(subject_idx).interpolated(d_rsf).header.xstep);
+        visual.y(1, :) = dataset(subject_idx).raw(d).data(1, 23, 1, 1, 1, trigger - 25 : trigger + 75);                   % raw data
+        visual.y(2, :) = dataset(subject_idx).interpolated(d_rsf).data(1, 23, 1, 1, 1, trigger - 25 : trigger + 75);      % iterpolated data
+
+        % plot into the check figure
+        figure(fig)
+        subplot(2, 2, d_rsf)
+        for a = 1:size(visual.y, 1)
+            plot(visual.x, visual.y(a, :),  "LineWidth", 1.2)
+            hold on
+        end
+        visual.ylim = get(gca, 'YLim');
+        line([0, 0], visual.ylim, 'Color', 'black', 'LineWidth', 2, 'LineStyle', '--')   
+        title(dataset(subject_idx).interpolated(d_rsf).header.name(6:end))        
+        set(gca, 'fontsize', 10)
+        ylabel('amplitude (\muV)')
+        xlabel('time (s)')
+        set(gca, 'Layer', 'Top')
+        set(gca, 'YDir', 'reverse');
+        if d_rsf == 1
+            sgtitle(sprintf('subject %d RF artifact interpolation', subject_idx))
+        end
+    
+        % update counter
+        d_rsf = d_rsf + 1;
+
+        % update info structure
+    end
+end
+fprintf('done.\n')
+
+% update figure counter 
+figure_counter = figure_counter + 1;
+
+% add letswave 7 to the top of search path
+addpath(genpath([folder.toolbox '\letswave 7']));
+
+% pre-process ERP data
+fprintf('*********** Subject %d: pre-processing ERPs ***********\n', subject_idx)
+d_erp = 1;
+for d = 1:length(dataset(subject_idx).raw)
+    if ~contains(dataset(subject_idx).raw(d).header.name, 'RS') 
+        % provide update
+        fprintf('%s:\n', dataset(subject_idx).raw(d).header.name(6:end))
+
+        % create a copy of the raw dataset
+        dataset(subject_idx).preprocessed(d_erp).header = dataset(subject_idx).raw(d).header;
+        dataset(subject_idx).preprocessed(d_erp).data = dataset(subject_idx).raw(d).data;
+
+        % re-label and filter events
+        event_idx = logical([]);
+        for a = 1:length(dataset(subject_idx).preprocessed(d_erp).header.events)
+            if strcmp(dataset(subject_idx).preprocessed(d_erp).header.events(a).code, params.eventcode{1})
+                dataset(subject_idx).preprocessed(d_erp).header.events(a).code = params.eventcode_new{1};
+                event_idx(a) = false; 
+            elseif strcmp(dataset(subject_idx).preprocessed(d_erp).header.events(a).code, params.eventcode{2})
+                dataset(subject_idx).preprocessed(d_erp).header.events(a).code = params.eventcode_new{2};
+                event_idx(a) = false; 
+            else
+                event_idx(a) = true; 
+            end
+        end
+        dataset(subject_idx).preprocessed(d_erp).header.events(event_idx) = [];
+
+        % check event number
+        fprintf('%d %s stimuli found.\n', length(dataset(subject_idx).preprocessed(d_erp).header.events), dataset(subject_idx).preprocessed(d_erp).header.events(1).code)
+        event_idx = false(1, length(dataset(subject_idx).preprocessed(d_erp).header.events));
+        if length(dataset(subject_idx).preprocessed(d_erp).header.events) > params.event_n
+            % ask which events should be removed
+            prompt = {sprintf('More than %d events were found\n. Which should be removed?', params.event_n)};
+            dlgtitle = sprintf('%s', dataset(subject_idx).raw(d).header.name);
+            dims = [1 40];
+            definput = {''};
+            input = inputdlg(prompt,dlgtitle,dims,definput);
+
+            % update index
+            event_idx(str2num(input{1,1})) = true;
+
+            % clean up
+            clear prompt dlgtitle dims definput input
+
+            % remove faulty events
+            dataset(subject_idx).preprocessed(d_erp).header.events(event_idx) = [];
+
+            % update info structure
+        end
+
+        % select the data for pre-processing
+        lwdata.header = dataset(subject_idx).preprocessed(d_erp).header;
+        lwdata.data = dataset(subject_idx).preprocessed(d_erp).data;
+
+        % assign electrode coordinates
+        fprintf('assigning electrode coordinates...')
+        option = struct('filepath', sprintf('%s\\letswave 7\\res\\electrodes\\spherical_locations\\Standard-10-20-Cap81.locs', folder.toolbox), ...
+            'suffix', '', 'is_save', 0);
+        lwdata = FLW_electrode_location_assign.get_lwdata(lwdata, option);
+        % if d == 1
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(1).process = sprintf('1 - electrode coordinates assigned (standard 10-20-cap81)');
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(1).date = sprintf('%s', date);
+        % end
+    
+        % remove DC + linear detrend
+        fprintf('removing DC and applying linear detrend...')
+        option = struct('linear_detrend', 1, 'suffix', params.suffix{1}, 'is_save', 0);
+        lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
+        % if d == 1
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end+1).process = sprintf('2 - DC correction + linear detrend');
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end).date = sprintf('%s', date);
+        % end
+    
+        % bandpass
+        fprintf('applying Butterworth bandpass filter...')
+        option = struct('filter_type', 'bandpass', 'high_cutoff', params.bandpass(2),'low_cutoff', params.bandpass(1),...
+            'filter_order', 4, 'suffix', params.suffix{2}, 'is_save', 0);
+        lwdata = FLW_butterworth_filter.get_lwdata(lwdata, option);
+        % if d == 1
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end+1).process = sprintf('3 - bandpass filtered [%.1f %.1f]Hz - Butterworth, 4th order', param.bandpass(1), param.bandpass(2));
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end).date = sprintf('%s', date);
+        % end
+    
+        % 50 Hz notch
+        fprintf('applying FFT notch filter...')
+        option = struct('filter_type', 'notch', 'notch_fre', 50, 'notch_width', 2, 'slope_width', 2,...
+            'harmonic_num', 2,'suffix', params.suffix{3},'is_save', 0);
+        lwdata = FLW_FFT_filter.get_lwdata(lwdata, option);
+        % if d == 1
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end+1).process = sprintf('4 - FFT notch filtered at 50 Hz');
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end).date = sprintf('%s', date);
+        % end
+    
+        % downsample and save
+        fprintf('downsampling...\n')
+        option = struct('x_dsratio', params.downsample, 'suffix', params.suffix{4}, 'is_save',1);
+        lwdata = FLW_downsample.get_lwdata(lwdata, option);
+        % if d == 1
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end+1).process = sprintf('5 - downsampled %d times --> final SR %d Hz', param.ds_ratio, 1/lwdata.header.xstep);
+        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end).date = sprintf('%s', date);
+        % end
+
+        % update dataset
+        dataset(subject_idx).preprocessed(d_erp).header = lwdata.header;
+        dataset(subject_idx).preprocessed(d_erp).data = lwdata.data;
+
+        % update counter
+        d_erp = d_erp + 1;        
+
+        % % save info structure
+        % save(output_file, 'RFSxLASER_info', '-append');
+    end
+end
+
+% pre-process RS data
+
+clear params a c d d_rsf d_erp shift_samples trigger visual event_idx lwdata
 
 %% 3) preprocess all datasets
 
