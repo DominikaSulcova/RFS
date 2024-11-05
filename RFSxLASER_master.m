@@ -147,7 +147,7 @@ for s = 1:length(params.stimulus)
         % ask for numbers to be plotted big
         plot_fig = true;
 
-        % press SPACE to start timing the session 
+        % press ENTER to start timing the session 
         fprintf('Threshold tracking: %s - %s hand\n', params.stimulus{s}, params.side{a});
         ok = 0; 
         while ok == 0    
@@ -776,14 +776,15 @@ clear params a b c d e f block file2import file2rmv filename dataname underscore
 
 %% 2) pre-process 
 % ----- section input -----
-params.suffix = {'dc' 'bandpass' 'notch' 'ds'};
+params.suffix = {'dc' 'bandpass' 'notch' 'ds' 'reref' 'ep' 'dc'};
 params.eventcode = {'S  1', 'S  2'};
 params.eventcode_new = {'laser', 'RFS'};
 params.interpolate = [-0.002 0.02];
 params.shift = 0.002;
-params.event_n = 30;
 params.bandpass = [0.1 80];
 params.downsample = 2;
+params.interp_chans = 6;
+params.event_n = 30;
 params.epoch = [-0.3 1];
 % -------------------------
 % % update the info structure
@@ -806,7 +807,7 @@ addpath(genpath([folder.toolbox '\letswave 6']));
 % launch check figure
 fig = figure(figure_counter);
 set(fig, 'Position', [50, 30, 750, 750])
-visual = struct([]);
+visual = struct;
 visual.x = -0.01 : dataset(subject_idx).raw(1).header.xstep : 0.03;
 
 % interpolate RFS artifact and shift
@@ -851,13 +852,23 @@ for d = 1:length(dataset(subject_idx).raw)
             sgtitle(sprintf('subject %d RF artifact interpolation', subject_idx))
         end
     
+        % update info structure
+        if d_rsf == 1
+            RFSxLASER_info(subject_idx).preprocessing(1).process = sprintf('RF artifact interpolated'); 
+            RFSxLASER_info(subject_idx).preprocessing(1).params.method = 'pchip';
+            RFSxLASER_info(subject_idx).preprocessing(1).params.limits = params.interpolate;
+            RFSxLASER_info(subject_idx).preprocessing(1).date = sprintf('%s', date);
+            RFSxLASER_info(subject_idx).preprocessing(2).process = sprintf('RF data shifted to correct for trigger delay');
+            RFSxLASER_info(subject_idx).preprocessing(2).params.shift = params.shift;
+            RFSxLASER_info(subject_idx).preprocessing(2).date = sprintf('%s', date);
+        end
+        
         % update counter
         d_rsf = d_rsf + 1;
-
-        % update info structure
     end
 end
 fprintf('done.\n')
+fprintf('\n')
 
 % update figure counter 
 figure_counter = figure_counter + 1;
@@ -865,37 +876,186 @@ figure_counter = figure_counter + 1;
 % add letswave 7 to the top of search path
 addpath(genpath([folder.toolbox '\letswave 7']));
 
-% pre-process ERP data
-fprintf('*********** Subject %d: pre-processing ERPs ***********\n', subject_idx)
-d_erp = 1;
+% first step of pre-processing
+fprintf('*********** Subject %d: first pre-processing ***********\n', subject_idx)
+for d = 1:length(dataset(subject_idx).raw)
+    % provide update
+    fprintf('%s:\n', dataset(subject_idx).raw(d).header.name(6:end))
+
+    % select the data for pre-processing
+    lwdata.header = dataset(subject_idx).raw(d).header;
+    lwdata.data = dataset(subject_idx).raw(d).data;
+
+    % assign electrode coordinates
+    fprintf('assigning electrode coordinates...')
+    option = struct('filepath', sprintf('%s\\letswave 7\\res\\electrodes\\spherical_locations\\Standard-10-20-Cap81.locs', folder.toolbox), ...
+        'suffix', '', 'is_save', 0);
+    lwdata = FLW_electrode_location_assign.get_lwdata(lwdata, option);
+    if d == 1
+        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('electrode coordinates assigned');
+        RFSxLASER_info(subject_idx).preprocessing(end).params.layout = sprintf('standard 10-20-cap81');
+        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+    end
+    
+    % remove DC + linear detrend
+    fprintf('removing DC and applying linear detrend...')
+    option = struct('linear_detrend', 1, 'suffix', params.suffix{1}, 'is_save', 0);
+    lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
+    if d == 1
+        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('DC + linear detrend on all continuous data');
+        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+    end
+    
+    % bandpass
+    fprintf('applying Butterworth bandpass filter...')
+    option = struct('filter_type', 'bandpass', 'high_cutoff', params.bandpass(2),'low_cutoff', params.bandpass(1),...
+        'filter_order', 4, 'suffix', params.suffix{2}, 'is_save', 0);
+    lwdata = FLW_butterworth_filter.get_lwdata(lwdata, option);
+    if d == 1
+        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('bandpass filtered');
+        RFSxLASER_info(subject_idx).preprocessing(end).params.method = sprintf('Butterworth');
+        RFSxLASER_info(subject_idx).preprocessing(end).params.order = 4;
+        RFSxLASER_info(subject_idx).preprocessing(end).params.limits = params.bandpass;
+        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+    end
+    
+    % 50 Hz notch
+    fprintf('applying FFT notch filter...')
+    option = struct('filter_type', 'notch', 'notch_fre', 50, 'notch_width', 2, 'slope_width', 2,...
+        'harmonic_num', 2,'suffix', params.suffix{3},'is_save', 0);
+    lwdata = FLW_FFT_filter.get_lwdata(lwdata, option);
+    if d == 1
+        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('notch filtered at 50 Hz');
+        RFSxLASER_info(subject_idx).preprocessing(end).params.method = sprintf('FFT');
+        RFSxLASER_info(subject_idx).preprocessing(end).params.width = 2;
+        RFSxLASER_info(subject_idx).preprocessing(end).params.slope = 2;
+        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+    end
+    
+    % downsample and save
+    fprintf('downsampling...\n')
+    option = struct('x_dsratio', params.downsample, 'suffix', params.suffix{4}, 'is_save',1);
+    lwdata = FLW_downsample.get_lwdata(lwdata, option);
+    if d == 1
+        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('downsampled');
+        RFSxLASER_info(subject_idx).preprocessing(end).params.ratio = params.downsample;
+        RFSxLASER_info(subject_idx).preprocessing(end).params.fs_orig = 1/lwdata.header.xstep;
+        RFSxLASER_info(subject_idx).preprocessing(end).params.fs_final = (1/lwdata.header.xstep)/params.downsample;
+        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+    end
+
+    % update dataset
+    dataset(subject_idx).preprocessed(d).header = lwdata.header;
+    dataset(subject_idx).preprocessed(d).data = lwdata.data;   
+end
+fprintf('done.\n')
+fprintf('\n')
+
+% check in letswave for bad channels
+letswave
+ok = 0; 
+while ok == 0    
+    key = input('Press ENTER to start', 's');
+    if isempty(key)  
+        ok = 1;  
+    end
+end    
+clear ok key 
+
+% interpolate channels if needed
+prompt = {'interpolate channels:'};
+dlgtitle = 'channel interpolation';
+dims = [1 220];
+definput = {strjoin({lwdata.header.chanlocs.labels}, ' ')};
+chans2interpolate = inputdlg(prompt,dlgtitle,dims,definput);
+chans2interpolate = split(chans2interpolate{1}, ' ');
+clear prompt dlgtitle dims definput 
+if ~isempty(chans2interpolate{1})
+    % provide update
+    fprintf('interpolating channel ')
+
+    % loop through channels to interpolate
+    for c = 1:length(chans2interpolate)
+        fprintf('%s ...', chans2interpolate{c})
+
+        % indentify the channel to interpolate
+        chan_n = find(strcmp({lwdata.header.chanlocs.labels}, chans2interpolate{c}));
+
+        % calculate distances with other electrodes
+        chan_dist = -ones(length(lwdata.header.chanlocs), 1);
+        for b = setdiff(1:length(lwdata.header.chanlocs), chan_n)
+            if lwdata.header.chanlocs(b).topo_enabled == 1
+                chan_dist(b) = sqrt((lwdata.header.chanlocs(b).X - lwdata.header.chanlocs(chan_n).X)^2 + ...
+                    (lwdata.header.chanlocs(b).Y - lwdata.header.chanlocs(chan_n).Y)^2 + ...
+                    (lwdata.header.chanlocs(b).Z - lwdata.header.chanlocs(chan_n).Z)^2);
+            end
+        end
+        chan_dist((chan_dist==-1)) = max(chan_dist);
+        [~,chan_dist] = sort(chan_dist);
+
+        % identify neighbouring channels
+        chan_dist = chan_dist(1:params.interp_chans);
+        chans2use = {lwdata.header.chanlocs.labels};
+        chans2use = chans2use(chan_dist);
+
+        % cycle through all datasets
+        for d = 1:length(dataset(subject_idx).raw)
+            % select data
+            lwdata.header = dataset(subject_idx).preprocessed(d).header;
+            lwdata.data = dataset(subject_idx).preprocessed(d).data;
+
+            % interpolate using the neighboring electrodes
+            option = struct('channel_to_interpolate', chans2interpolate{c}, 'channels_for_interpolation_list', {chans2use}, ...
+                'suffix', 'chan_interp', 'is_save', 0);
+            lwdata = FLW_interpolate_channel.get_lwdata(lwdata, option);
+
+            % update dataset
+            dataset(subject_idx).preprocessed(d).header = lwdata.header;
+            dataset(subject_idx).preprocessed(d).data = lwdata.data;  
+        end
+
+        % update info structure
+        if c == 1
+            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('bad channels interpolated');
+            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        end
+        RFSxLASER_info(subject_idx).preprocessing(end).params.bad{c} = chans2interpolate{c};
+        RFSxLASER_info(subject_idx).preprocessing(end).params.chans_used{c} = strjoin(chans2use, ' ');    
+    end
+end
+
+% segment ERP data
+fprintf('*********** Subject %d: segmenting ERP data ***********\n', subject_idx)
+d_erp = 1;      % set counter
 for d = 1:length(dataset(subject_idx).raw)
     if ~contains(dataset(subject_idx).raw(d).header.name, 'RS') 
         % provide update
         fprintf('%s:\n', dataset(subject_idx).raw(d).header.name(6:end))
 
-        % create a copy of the raw dataset
-        dataset(subject_idx).preprocessed(d_erp).header = dataset(subject_idx).raw(d).header;
-        dataset(subject_idx).preprocessed(d_erp).data = dataset(subject_idx).raw(d).data;
+        % select data
+        lwdata.header = dataset(subject_idx).preprocessed(d).header;
+        lwdata.data = dataset(subject_idx).preprocessed(d).data;
 
         % re-label and filter events
+        fprintf('checking events... ')
         event_idx = logical([]);
-        for a = 1:length(dataset(subject_idx).preprocessed(d_erp).header.events)
-            if strcmp(dataset(subject_idx).preprocessed(d_erp).header.events(a).code, params.eventcode{1})
-                dataset(subject_idx).preprocessed(d_erp).header.events(a).code = params.eventcode_new{1};
+        for a = 1:lwdata.header.events)
+            if strcmp(dataset(subject_idx).preprocessed(d).header.events(a).code, params.eventcode{1})
+                dataset(subject_idx).preprocessed(d).header.events(a).code = params.eventcode_new{1};
                 event_idx(a) = false; 
-            elseif strcmp(dataset(subject_idx).preprocessed(d_erp).header.events(a).code, params.eventcode{2})
-                dataset(subject_idx).preprocessed(d_erp).header.events(a).code = params.eventcode_new{2};
+            elseif strcmp(dataset(subject_idx).preprocessed(d).header.events(a).code, params.eventcode{2})
+                dataset(subject_idx).preprocessed(d).header.events(a).code = params.eventcode_new{2};
                 event_idx(a) = false; 
             else
                 event_idx(a) = true; 
             end
         end
-        dataset(subject_idx).preprocessed(d_erp).header.events(event_idx) = [];
+        dataset(subject_idx).preprocessed(d).header.events(event_idx) = [];
 
         % check event number
-        fprintf('%d %s stimuli found.\n', length(dataset(subject_idx).preprocessed(d_erp).header.events), dataset(subject_idx).preprocessed(d_erp).header.events(1).code)
-        event_idx = false(1, length(dataset(subject_idx).preprocessed(d_erp).header.events));
-        if length(dataset(subject_idx).preprocessed(d_erp).header.events) > params.event_n
+        fprintf('%d %s stimuli found.\n', length(dataset(subject_idx).preprocessed(d).header.events), dataset(subject_idx).preprocessed(d_erp).header.events(1).code)
+        event_idx = false(1, length(dataset(subject_idx).preprocessed(d).header.events));
+        if length(dataset(subject_idx).preprocessed(d).header.events) > params.event_n
             % ask which events should be removed
             prompt = {sprintf('More than %d events were found\n. Which should be removed?', params.event_n)};
             dlgtitle = sprintf('%s', dataset(subject_idx).raw(d).header.name);
@@ -913,75 +1073,60 @@ for d = 1:length(dataset(subject_idx).raw)
             dataset(subject_idx).preprocessed(d_erp).header.events(event_idx) = [];
 
             % update info structure
+            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('faulty triggers removed');
+            RFSxLASER_info(subject_idx).preprocessing(end).params.trig_removed = find(event_idx);
+            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
         end
 
-        % select the data for pre-processing
-        lwdata.header = dataset(subject_idx).preprocessed(d_erp).header;
-        lwdata.data = dataset(subject_idx).preprocessed(d_erp).data;
+        % re-reference to common average
+        fprintf('re-referencing to common average...')
+        option = struct('reference_list', {{lwdata.header.chanlocs(1:length(lwdata.header.chanlocs)).labels}}, ...
+            'apply_list', {{lwdata.header.chanlocs(1:length(lwdata.header.chanlocs)).labels}}, 'suffix', params.suffix{5}, 'is_save', 0);
+        lwdata = FLW_rereference.get_lwdata(lwdata, option);
+        if d_erp == 1
+            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('ERP data re-referenced to common average');
+            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        end
 
-        % assign electrode coordinates
-        fprintf('assigning electrode coordinates...')
-        option = struct('filepath', sprintf('%s\\letswave 7\\res\\electrodes\\spherical_locations\\Standard-10-20-Cap81.locs', folder.toolbox), ...
-            'suffix', '', 'is_save', 0);
-        lwdata = FLW_electrode_location_assign.get_lwdata(lwdata, option);
-        % if d == 1
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(1).process = sprintf('1 - electrode coordinates assigned (standard 10-20-cap81)');
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(1).date = sprintf('%s', date);
-        % end
+        % segment
+        fprintf('epoching ...')
+        option = struct('event_labels', {lwdata.header.events(1).code}, 'x_start', params.epoch(1), 'x_end', params.epoch(2), ...
+            'x_duration', params.epoch(2)-params.epoch(1), 'suffix', params.suffix{6}, 'is_save', 0);
+        lwdata = FLW_segmentation.get_lwdata(lwdata, option);
+        if d_erp == 1
+            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('ERP data segmented');
+            RFSxLASER_info(subject_idx).preprocessing(end).params.limits = params.epoch;
+            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        end
     
         % remove DC + linear detrend
-        fprintf('removing DC and applying linear detrend...')
-        option = struct('linear_detrend', 1, 'suffix', params.suffix{1}, 'is_save', 0);
+        fprintf('removing DC and applying linear detrend...\n')
+        option = struct('linear_detrend', 1, 'suffix', params.suffix{7}, 'is_save', 1);
         lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
-        % if d == 1
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end+1).process = sprintf('2 - DC correction + linear detrend');
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end).date = sprintf('%s', date);
-        % end
-    
-        % bandpass
-        fprintf('applying Butterworth bandpass filter...')
-        option = struct('filter_type', 'bandpass', 'high_cutoff', params.bandpass(2),'low_cutoff', params.bandpass(1),...
-            'filter_order', 4, 'suffix', params.suffix{2}, 'is_save', 0);
-        lwdata = FLW_butterworth_filter.get_lwdata(lwdata, option);
-        % if d == 1
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end+1).process = sprintf('3 - bandpass filtered [%.1f %.1f]Hz - Butterworth, 4th order', param.bandpass(1), param.bandpass(2));
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end).date = sprintf('%s', date);
-        % end
-    
-        % 50 Hz notch
-        fprintf('applying FFT notch filter...')
-        option = struct('filter_type', 'notch', 'notch_fre', 50, 'notch_width', 2, 'slope_width', 2,...
-            'harmonic_num', 2,'suffix', params.suffix{3},'is_save', 0);
-        lwdata = FLW_FFT_filter.get_lwdata(lwdata, option);
-        % if d == 1
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end+1).process = sprintf('4 - FFT notch filtered at 50 Hz');
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end).date = sprintf('%s', date);
-        % end
-    
-        % downsample and save
-        fprintf('downsampling...\n')
-        option = struct('x_dsratio', params.downsample, 'suffix', params.suffix{4}, 'is_save',1);
-        lwdata = FLW_downsample.get_lwdata(lwdata, option);
-        % if d == 1
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end+1).process = sprintf('5 - downsampled %d times --> final SR %d Hz', param.ds_ratio, 1/lwdata.header.xstep);
-        %     NLEP_info.single_subject(subject_idx).preprocessing.block_1(end).date = sprintf('%s', date);
-        % end
+        if d_erp == 1
+            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('DC + linear detrend on ERP epochs');
+            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        end
 
         % update dataset
-        dataset(subject_idx).preprocessed(d_erp).header = lwdata.header;
-        dataset(subject_idx).preprocessed(d_erp).data = lwdata.data;
-
-        % update counter
-        d_erp = d_erp + 1;        
-
-        % % save info structure
-        % save(output_file, 'RFSxLASER_info', '-append');
+        dataset(subject_idx).preprocessed(d).header = lwdata.header;
+        dataset(subject_idx).preprocessed(d).data = lwdata.data; 
     end
 end
+fprintf('done.\n')
+fprintf('\n')
 
-% pre-process RS data
+% save to the output file
+save(output_file, 'RFSxLASER_info', '-append');
 
-clear params a c d d_rsf d_erp shift_samples trigger visual event_idx lwdata
+% ask if the subject is done
+answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
+switch answer
+    case 'NO'
+    case 'YES'
+    	subject_idx = subject_idx + 1;
+end 
+clear params a b c d d_rsf d_erp shift_samples trigger visual event_idx lwdata chans2interpolate chan_n chan_dist chans2use fig option answer
 
 %% 3) preprocess all datasets
 
