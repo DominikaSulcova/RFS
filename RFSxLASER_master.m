@@ -516,7 +516,7 @@ haleluja = y; clear y Fs
 %% 1) import data for letswave, preview
 % ----- section input -----
 params.data = {'RS', 'LEP', 'RFS'};
-params.preview = true;
+params.preview = false;
 params.folder = 'EEG';
 params.data_n = 4;
 params.event_n = 30;
@@ -878,7 +878,7 @@ addpath(genpath([folder.toolbox '\letswave 7']));
 
 % first step of pre-processing
 fprintf('*********** Subject %d: first pre-processing ***********\n', subject_idx)
-for d = 1:length(dataset(subject_idx).raw)
+for d = 4:length(dataset(subject_idx).raw)
     % provide update
     fprintf('%s:\n', dataset(subject_idx).raw(d).header.name(6:end))
 
@@ -1026,8 +1026,7 @@ end
 
 % segment ERP data
 fprintf('*********** Subject %d: segmenting ERP data ***********\n', subject_idx)
-d_erp = 1;      % set counter
-for d = 1:length(dataset(subject_idx).raw)
+for d = 4:length(dataset(subject_idx).raw)
     if ~contains(dataset(subject_idx).raw(d).header.name, 'RS') 
         % provide update
         fprintf('%s:\n', dataset(subject_idx).raw(d).header.name(6:end))
@@ -1039,23 +1038,24 @@ for d = 1:length(dataset(subject_idx).raw)
         % re-label and filter events
         fprintf('checking events... ')
         event_idx = logical([]);
-        for a = 1:lwdata.header.events)
-            if strcmp(dataset(subject_idx).preprocessed(d).header.events(a).code, params.eventcode{1})
-                dataset(subject_idx).preprocessed(d).header.events(a).code = params.eventcode_new{1};
+        for a = 1:length(lwdata.header.events)
+            if strcmp(lwdata.header.events(a).code, params.eventcode{1})
+                lwdata.header.events(a).code = params.eventcode_new{1};
                 event_idx(a) = false; 
-            elseif strcmp(dataset(subject_idx).preprocessed(d).header.events(a).code, params.eventcode{2})
-                dataset(subject_idx).preprocessed(d).header.events(a).code = params.eventcode_new{2};
+            elseif strcmp(lwdata.header.events(a).code, params.eventcode{2})
+                lwdata.header.events(a).code = params.eventcode_new{2};
                 event_idx(a) = false; 
             else
                 event_idx(a) = true; 
             end
         end
-        dataset(subject_idx).preprocessed(d).header.events(event_idx) = [];
+        lwdata.header.events(event_idx) = [];
 
         % check event number
-        fprintf('%d %s stimuli found.\n', length(dataset(subject_idx).preprocessed(d).header.events), dataset(subject_idx).preprocessed(d_erp).header.events(1).code)
-        event_idx = false(1, length(dataset(subject_idx).preprocessed(d).header.events));
-        if length(dataset(subject_idx).preprocessed(d).header.events) > params.event_n
+        fprintf('%d %s stimuli found.\n', length(lwdata.header.events), lwdata.header.events(1).code)
+        event_idx = false(1, length(lwdata.header.events));
+        bad_counter = 1;
+        if length(lwdata.header.events) > params.event_n
             % ask which events should be removed
             prompt = {sprintf('More than %d events were found\n. Which should be removed?', params.event_n)};
             dlgtitle = sprintf('%s', dataset(subject_idx).raw(d).header.name);
@@ -1070,12 +1070,16 @@ for d = 1:length(dataset(subject_idx).raw)
             clear prompt dlgtitle dims definput input
 
             % remove faulty events
-            dataset(subject_idx).preprocessed(d_erp).header.events(event_idx) = [];
+            lwdata.header.events(event_idx) = [];
 
             % update info structure
             RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('faulty triggers removed');
-            RFSxLASER_info(subject_idx).preprocessing(end).params.trig_removed = find(event_idx);
+            RFSxLASER_info(subject_idx).preprocessing(end).params.dataset{bad_counter} = dataset(subject_idx).raw(d).header.name;   
+            RFSxLASER_info(subject_idx).preprocessing(end).params.trig_removed{bad_counter} = find(event_idx);
             RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+
+            % update counter
+            bad_counter = bad_counter + 1;
         end
 
         % re-reference to common average
@@ -1083,7 +1087,7 @@ for d = 1:length(dataset(subject_idx).raw)
         option = struct('reference_list', {{lwdata.header.chanlocs(1:length(lwdata.header.chanlocs)).labels}}, ...
             'apply_list', {{lwdata.header.chanlocs(1:length(lwdata.header.chanlocs)).labels}}, 'suffix', params.suffix{5}, 'is_save', 0);
         lwdata = FLW_rereference.get_lwdata(lwdata, option);
-        if d_erp == 1
+        if d == 1
             RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('ERP data re-referenced to common average');
             RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
         end
@@ -1093,7 +1097,7 @@ for d = 1:length(dataset(subject_idx).raw)
         option = struct('event_labels', {lwdata.header.events(1).code}, 'x_start', params.epoch(1), 'x_end', params.epoch(2), ...
             'x_duration', params.epoch(2)-params.epoch(1), 'suffix', params.suffix{6}, 'is_save', 0);
         lwdata = FLW_segmentation.get_lwdata(lwdata, option);
-        if d_erp == 1
+        if d == 1
             RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('ERP data segmented');
             RFSxLASER_info(subject_idx).preprocessing(end).params.limits = params.epoch;
             RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
@@ -1103,7 +1107,7 @@ for d = 1:length(dataset(subject_idx).raw)
         fprintf('removing DC and applying linear detrend...\n')
         option = struct('linear_detrend', 1, 'suffix', params.suffix{7}, 'is_save', 1);
         lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
-        if d_erp == 1
+        if d == 1
             RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('DC + linear detrend on ERP epochs');
             RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
         end
@@ -1126,7 +1130,7 @@ switch answer
     case 'YES'
     	subject_idx = subject_idx + 1;
 end 
-clear params a b c d d_rsf d_erp shift_samples trigger visual event_idx lwdata chans2interpolate chan_n chan_dist chans2use fig option answer
+clear params a b c d d_rsf shift_samples trigger visual event_idx lwdata chans2interpolate chan_n chan_dist chans2use fig option bad_counter answer
 
 %% 3) preprocess all datasets
 
