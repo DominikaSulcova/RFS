@@ -499,7 +499,7 @@ if ~exist('folder')
     folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
     folder.output = uigetdir(pwd, 'Choose the OneDrive folder');    % output folder --> figures, loutput file, exports 
 end
-folder.processed = uigetdir(pwd, 'Choose the data folder');     % processed data --> wherever you want to store the voluminous EEG data
+folder.processed = uigetdir(pwd, 'Choose the data folder');         % processed data --> wherever you want to store the voluminous EEG data
 cd(folder.output)
 
 % output
@@ -606,11 +606,11 @@ switch answer
     case 'NO'
     case 'YES'
         % save raw data to the output folder
-	    for d = 1:length(length(dataset(subject_idx).raw))
+	    for d = 1:length(dataset(subject_idx).raw)
             data = dataset(subject_idx).raw(d).data;
             header = dataset(subject_idx).raw(d).header;
-            save(sprintf('%s.mat', subject_idx.raw(d).header.name), 'data');
-            save(sprintf('%s.lw6', subject_idx.raw(d).header.name), 'header');
+            save(sprintf('%s.mat', header.name), 'data');
+            save(sprintf('%s.lw6', header.name), 'header');
         end
 end 
 
@@ -774,7 +774,7 @@ end
 clear params a b c d e f block file2import file2rmv filename dataname underscores events event_n event_code lwdata ...
     data data_visual cfg eoi fig fig_name option screen_size answer preview_save
 
-%% 2) pre-process 
+%% 2) pre-process all data
 % ----- section input -----
 params.suffix = {'dc' 'bandpass' 'notch' 'ds' 'reref' 'ep' 'dc'};
 params.eventcode = {'S  1', 'S  2'};
@@ -788,7 +788,8 @@ params.event_n = 30;
 params.epoch = [-0.3 1];
 % -------------------------
 % % update the info structure
-% load(output_file, 'RFSxLASER_info');
+load(output_file, 'RFSxLASER_info');
+cd(folder.processed)
 
 % ask for subject number, if not defined
 if ~exist('subject_idx')
@@ -812,48 +813,48 @@ visual.x = -0.01 : dataset(subject_idx).raw(1).header.xstep : 0.03;
 
 % interpolate RFS artifact and shift
 fprintf('*********** Subject %d: interpolating RF artifact ***********\n', subject_idx)
-d_rsf = 1;      % dataset counter
+d_rfs = 1;      % dataset counter
 for d = 1:length(dataset(subject_idx).raw)
     if contains(dataset(subject_idx).raw(d).header.name, 'RFS')  
         % provide update
         fprintf('%s ...', dataset(subject_idx).raw(d).header.name(10:end))
 
         % interpolate signal around the RF artifact --> cubic interpolation
-        [dataset(subject_idx).interpolated(d_rsf).header, dataset(subject_idx).interpolated(d_rsf).data, ~] = RLW_suppress_artifact_event(dataset(subject_idx).raw(d).header, dataset(subject_idx).raw(d).data,... 
+        [dataset(subject_idx).interpolated(d_rfs).header, dataset(subject_idx).interpolated(d_rfs).data, ~] = RLW_suppress_artifact_event(dataset(subject_idx).raw(d).header, dataset(subject_idx).raw(d).data,... 
             'xstart', params.interpolate(1), 'xend', params.interpolate(2), 'event_code', params.eventcode{2}, 'interp_method', 'pchip');
 
         % shift data by trigger duration
-        shift_samples = round(params.shift / dataset(subject_idx).interpolated(d_rsf).header.xstep); 
-        for c = 1:size(dataset(subject_idx).interpolated(d_rsf).data, 2)
-            dataset(subject_idx).interpolated(d_rsf).data(1, c, 1, 1, 1, 1:end-shift_samples) = dataset(subject_idx).interpolated(d_rsf).data(1, c, 1, 1, 1, 1 + shift_samples:end);
+        shift_samples = round(params.shift / dataset(subject_idx).interpolated(d_rfs).header.xstep); 
+        for c = 1:size(dataset(subject_idx).interpolated(d_rfs).data, 2)
+            dataset(subject_idx).interpolated(d_rfs).data(1, c, 1, 1, 1, 1:end-shift_samples) = dataset(subject_idx).interpolated(d_rfs).data(1, c, 1, 1, 1, 1 + shift_samples:end);
         end
 
         % extract data for visualization --> Cz electrode, first trigger
-        trigger = round(dataset(subject_idx).interpolated(d_rsf).header.events(2).latency / dataset(subject_idx).interpolated(d_rsf).header.xstep);
+        trigger = round(dataset(subject_idx).interpolated(d_rfs).header.events(2).latency / dataset(subject_idx).interpolated(d_rfs).header.xstep);
         visual.y(1, :) = dataset(subject_idx).raw(d).data(1, 23, 1, 1, 1, trigger - 25 : trigger + 75);                   % raw data
-        visual.y(2, :) = dataset(subject_idx).interpolated(d_rsf).data(1, 23, 1, 1, 1, trigger - 25 : trigger + 75);      % iterpolated data
+        visual.y(2, :) = dataset(subject_idx).interpolated(d_rfs).data(1, 23, 1, 1, 1, trigger - 25 : trigger + 75);      % iterpolated data
 
         % plot into the check figure
         figure(fig)
-        subplot(2, 2, d_rsf)
+        subplot(2, 2, d_rfs)
         for a = 1:size(visual.y, 1)
             plot(visual.x, visual.y(a, :),  "LineWidth", 1.2)
             hold on
         end
         visual.ylim = get(gca, 'YLim');
         line([0, 0], visual.ylim, 'Color', 'black', 'LineWidth', 2, 'LineStyle', '--')   
-        title(dataset(subject_idx).interpolated(d_rsf).header.name(6:end))        
+        title(dataset(subject_idx).interpolated(d_rfs).header.name(6:end))        
         set(gca, 'fontsize', 10)
         ylabel('amplitude (\muV)')
         xlabel('time (s)')
         set(gca, 'Layer', 'Top')
         set(gca, 'YDir', 'reverse');
-        if d_rsf == 1
+        if d_rfs == 1
             sgtitle(sprintf('subject %d RF artifact interpolation', subject_idx))
         end
     
         % update info structure
-        if d_rsf == 1
+        if d_rfs == 1
             RFSxLASER_info(subject_idx).preprocessing(1).process = sprintf('RF artifact interpolated'); 
             RFSxLASER_info(subject_idx).preprocessing(1).params.method = 'pchip';
             RFSxLASER_info(subject_idx).preprocessing(1).params.limits = params.interpolate;
@@ -864,7 +865,7 @@ for d = 1:length(dataset(subject_idx).raw)
         end
         
         % update counter
-        d_rsf = d_rsf + 1;
+        d_rfs = d_rfs + 1;
     end
 end
 fprintf('done.\n')
@@ -878,13 +879,23 @@ addpath(genpath([folder.toolbox '\letswave 7']));
 
 % first step of pre-processing
 fprintf('*********** Subject %d: first pre-processing ***********\n', subject_idx)
-for d = 4:length(dataset(subject_idx).raw)
+d_rfs = 1;      % RFS counter
+for d = 1:length(dataset(subject_idx).raw)
     % provide update
     fprintf('%s:\n', dataset(subject_idx).raw(d).header.name(6:end))
 
     % select the data for pre-processing
-    lwdata.header = dataset(subject_idx).raw(d).header;
-    lwdata.data = dataset(subject_idx).raw(d).data;
+    if contains(dataset(subject_idx).raw(d).header.name, 'RFS')
+        % load the interpolated data
+        lwdata.header = dataset(subject_idx).interpolated(d_rfs).header;
+        lwdata.data = dataset(subject_idx).interpolated(d_rfs).data;
+
+        % update the counter
+        d_rfs = d_rfs + 1;
+    else
+        lwdata.header = dataset(subject_idx).raw(d).header;
+        lwdata.data = dataset(subject_idx).raw(d).data;
+    end
 
     % assign electrode coordinates
     fprintf('assigning electrode coordinates...')
@@ -1026,7 +1037,7 @@ end
 
 % segment ERP data
 fprintf('*********** Subject %d: segmenting ERP data ***********\n', subject_idx)
-for d = 4:length(dataset(subject_idx).raw)
+for d = 1:length(dataset(subject_idx).raw)
     if ~contains(dataset(subject_idx).raw(d).header.name, 'RS') 
         % provide update
         fprintf('%s:\n', dataset(subject_idx).raw(d).header.name(6:end))
@@ -1073,12 +1084,25 @@ for d = 4:length(dataset(subject_idx).raw)
             lwdata.header.events(event_idx) = [];
 
             % update info structure
-            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('faulty triggers removed');
-            RFSxLASER_info(subject_idx).preprocessing(end).params.dataset{bad_counter} = dataset(subject_idx).raw(d).header.name;   
-            RFSxLASER_info(subject_idx).preprocessing(end).params.trig_removed{bad_counter} = find(event_idx);
-            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+            if bad_counter == 1 
+                RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('faulty triggers removed');
+                RFSxLASER_info(subject_idx).preprocessing(end).params.dataset{bad_counter} = dataset(subject_idx).raw(d).header.name;   
+                RFSxLASER_info(subject_idx).preprocessing(end).params.trig_removed{bad_counter} = find(event_idx);
+                RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+            else
+                % identify the correct entry
+                for i = 1:length(RFSxLASER_info(subject_idx).preprocessing)
+                    if contains(RFSxLASER_info(subject_idx).preprocessing(i).process, 'faulty trigger')
+                        bad_idx = i;
+                    end
+                end
 
-            % update counter
+                % update the entry
+                RFSxLASER_info(subject_idx).preprocessing(bad_idx).params.dataset{bad_counter} = dataset(subject_idx).raw(d).header.name;   
+                RFSxLASER_info(subject_idx).preprocessing(endbad_idx).params.trig_removed{bad_counter} = find(event_idx);
+            end
+
+            % update bad counter
             bad_counter = bad_counter + 1;
         end
 
@@ -1130,58 +1154,488 @@ switch answer
     case 'YES'
     	subject_idx = subject_idx + 1;
 end 
-clear params a b c d d_rsf shift_samples trigger visual event_idx lwdata chans2interpolate chan_n chan_dist chans2use fig option bad_counter answer
+clear params a b c d d_rfs i shift_samples trigger visual event_idx lwdata chans2interpolate chan_n chan_dist chans2use...
+    fig option bad_counter bad_idx answer
 
-%% 3) preprocess all datasets
+%% 3) compute ICA
+% preliminary analysis --> only ERPs included
+% ----- section input -----
+params.prefix = 'dc ep reref ds notch bandpass dc';
+params.n_files = 8;
+params.suffix = {'ica'};
+% -------------------------
+% update 
+load(output_file, 'RFSxLASER_info');
+cd(folder.processed)
 
-%% functions
-function plot_thresholds(visual, threshold)        
-    % plot the line
-    plot(visual.x, visual.intensity, ':', 'color', [0.6510    0.6510    0.6510], 'linewidth', 3)
-    hold on
-    
-    % plot the trials
-    for e = 1:length(visual.x)
-        plot(visual.x(e), visual.intensity(e), 'o', 'MarkerSize', 12, 'MarkerEdgeColor','none','MarkerFaceColor', visual.color(e, :))
-        hold on
+% ask for subject number
+if ~exist('subject_idx')
+    prompt = {'subject number:'};
+    dlgtitle = 'subject';
+    dims = [1 40];
+    definput = {''};
+    input = inputdlg(prompt,dlgtitle,dims,definput);
+    subject_idx = str2num(input{1,1});
+end
+clear prompt dlgtitle dims definput input
+
+% define the datasets with associated ICA matrix
+file2process = dir(sprintf('*%s*%s*.mat', params.prefix, RFSxLASER_info(subject_idx).ID));
+if length(file2process) == params.n_files
+    for i = 1:length(file2process)
+        filenames{i} = sprintf('%s %s',params.suffix{1}, file2process(i).name);
     end
-
-    % plot three dummy points (one for each color) for the legend
-    h(1) = plot(NaN, NaN, 'o', 'MarkerSize', 12, 'MarkerFaceColor', [0.6510    0.6510    0.6510], 'MarkerEdgeColor', 'none');  
-    h(2) = plot(NaN, NaN, 'o', 'MarkerSize', 12, 'MarkerFaceColor', [0    0.4471    0.7412], 'MarkerEdgeColor', 'none');  
-    h(3) = plot(NaN, NaN, 'o', 'MarkerSize', 12, 'MarkerFaceColor', [0.8000    0.0157    0.0157], 'MarkerEdgeColor', 'none');  
-    h(4) = plot(NaN, NaN, 'o', 'MarkerSize', 12, 'MarkerFaceColor', [0 0 0], 'MarkerEdgeColor', 'none'); 
-
-    % identify spans of the axes
-    y_lim = get(gca, "YLim");
-    y_span = y_lim(2) - y_lim(1);
-    x_lim = get(gca, "XLim");
-    x_span = x_lim(2) - x_lim(1);
-    
-    % plot thresholds
-    line(0:visual.x(end)+1, repelem(round(mean(threshold.perception), 2), 1, length(visual.x)+2), ...
-        'color', [0    0.4471    0.7412], 'linewidth', 1.5)
-    line(0:visual.x(end)+1, repelem(round(mean(threshold.pain), 2), 1, length(visual.x)+2), ...
-        'color', [0.8000    0.0157    0.0157], 'linewidth', 1.5)
-    line(0:visual.x(end)+1, repelem(round(mean(threshold.subjective), 2), 1, length(visual.x)+2), ...
-        'color', [0.8000    0.0157    0.0157], 'linewidth', 1.5, 'linestyle', '--')
-    
-    % plot annotations
-    text(0.01*x_span, round(mean(threshold.perception), 2) + 0.02*y_span, ...
-        sprintf('perception: %.2f %s', round(mean(threshold.perception), 2), visual.unit), 'fontsize', 14);
-    text(0.01*x_span, round(mean(threshold.pain), 2) + 0.02*y_span, ...
-        sprintf('pain: %.2f %s', round(mean(threshold.pain), 2), visual.unit), 'fontsize', 14);
-    text(0.01*x_span, round(mean(threshold.subjective), 2) + 0.02*y_span, ...
-        sprintf('subjective pain: %.2f %s', round(mean(threshold.subjective), 2), visual.unit), 'fontsize', 14);
-    
-    % adjust visuals
-    xlim([0, visual.x(end)+1]); 
-    ylim([0.9*min(visual.intensity), 1.1*max(visual.intensity)])
-    xlabel('trials'); 
-    ylabel(sprintf('stimulation intensity (%s)', visual.unit));
-    set(gca, 'fontsize', 14)
-
-    % add the legend
-    legend(h, {'not perceived', 'not painful', 'painful', 'electric'}, 'Location', 'northwest', 'Box', 'off');
+else
+    error('ERROR: Incorrect number of datasets for ICA found in the directory: %d\n', length(file2process));
 end
 
+% open letswave and manually run ICA
+fprintf('OK, run the ICA now!\n')
+addpath(genpath([folder.toolbox '\letswave 6']));
+letswave
+
+% wait until all files are processed
+wait4files(filenames);
+
+% extract ICA matrices 
+fprintf('extracting ICA matrices...\n')
+load(sprintf('%s %slw6',params.suffix{1}, file2process(1).name(1:end-3)), '-mat');
+ICA.matrix = header.history(end).configuration.parameters.ICA_mm;
+ICA.unmix = header.history(end).configuration.parameters.ICA_um;
+ICA.chanlocs = header.chanlocs;
+for i = 1:size(ICA.unmix, 1)
+    ICA.labels{i} = ['IC',num2str(i)];
+end
+ICA.fs = 1/header.xstep;
+
+% unmix data
+ICA.data = [];
+fprintf('unmixing the data: dataset ')
+for d = 1:length(filenames)
+    fprintf('%d ...', d)
+    load(filenames{d});
+    for e = 1:size(data, 1)
+        ICA.data(end + 1, :, :) = ICA.unmix * squeeze(data(e, :, 1, 1, 1, :));        
+    end
+end
+ICA.data = permute(ICA.data, [2, 1, 3]);
+fprintf('\n')
+
+% calculate spectral content for each 
+fprintf('estimating spectral content...\n')
+for c = 1:size(ICA.data, 1)
+    for e = 1:size(ICA.data, 2)
+        [psd(c, e, :), freq] = pwelch(squeeze(ICA.data(c, e, :)), [], [], [], ICA.fs);  
+    end
+end
+ICA.psd = squeeze(mean(psd, 2));
+fprintf('done.\n')
+
+% plot component topographies and spectral content
+figure('units','normalized','outerposition',[0 0 1 1]);
+hold on
+for f = 1:size(ICA.unmix, 1)
+    % plot the topography
+    subplot(size(ICA.unmix, 1)/3, 6, (f-1)*2 + 1);
+    topoplot(ICA.matrix(:, f), ICA.chanlocs, 'maplimits', [-4 4], 'shading', 'interp', 'whitebk', 'on', 'electrodes', 'off')
+    set(gca,'color',[1 1 1]);
+    title(ICA.labels{f})
+
+    % plot the psd
+    subplot(size(ICA.unmix, 1)/3, 6, (f-1)*2 + 2);
+    plot(freq(1:21), ICA.psd(f, 1:21));
+    xlabel('Frequency (Hz)');
+    ylabel('Power (dB)');
+end
+saveas(gcf, sprintf('%s\\figures\\ICA_%s.png', folder.output, RFSxLASER_info(subject_idx).ID));
+
+% udate and save info structure
+RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('ERP data filtered using ICA');
+RFSxLASER_info(subject_idx).preprocessing(end).params.n_components = size(ICA.unmix, 1);
+RFSxLASER_info(subject_idx).preprocessing(end).params.matrix = ICA.matrix;
+RFSxLASER_info(subject_idx).preprocessing(end).params.unmix = ICA.unmix;
+RFSxLASER_info(subject_idx).preprocessing(end).params.psd = ICA.psd;
+RFSxLASER_info(subject_idx).preprocessing(end).params.freq = freq;
+RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+save(output_file, 'RFSxLASER_info', '-append');
+
+% ask if the subject is done
+answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
+switch answer
+    case 'NO'
+    case 'YES'
+    	subject_idx = subject_idx + 1;
+end 
+clear params c d e f i file2process data header filenames ICA psd freq answer
+
+%% 4) encode ICA 
+% update 
+load(output_file, 'RFSxLASER_info');
+cd(folder.processed)
+
+% ask for subject number if necessary
+if ~exist('subject_idx')
+    prompt = {'subject number:'};
+    dlgtitle = 'subject';
+    dims = [1 40];
+    definput = {''};
+    input = inputdlg(prompt,dlgtitle,dims,definput);
+    subject_idx = str2num(input{1,1});
+end
+clear prompt dlgtitle dims definput input
+
+% encode ICA outcome
+prompt = {'blinks:', 'horizontal:', 'muscles:', 'electrode noise:'};
+dlgtitle = 'ICA';
+dims = [1 40];
+definput = {'', '', '', ''};
+input = inputdlg(prompt,dlgtitle,dims,definput);
+RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_kept = RFSxLASER_info(subject_idx).preprocessing(end).params.n_components...
+    - length([str2num(input{1}), str2num(input{2}), str2num(input{3}), str2num(input{4})]);
+RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_removed.blinks = str2num(input{1});
+RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_removed.horizontal = str2num(input{2});
+RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_removed.muscles = str2num(input{3});
+RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_removed.electrodes = str2num(input{4});
+clear prompt dlgtitle dims definput input
+
+% save info structure 
+save(output_file, 'RFSxLASER_info', '-append');
+
+% ask if the subject is done
+answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
+switch answer
+    case 'NO'
+    case 'YES'
+    	subject_idx = subject_idx + 1;
+end 
+
+%% ERP visualization
+% ----- section input -----
+params.subjects = 1:9;
+params.prefix = 'dc ep reref ds notch bandpass dc';
+params.side = {'right' 'left'};
+params.stimulus = {'laser' 'RFS'};
+params.intensity = {'high' 'low'};
+params.eoi = 'Cz';
+params.confidence = 'SD';
+params.xlim = [-0.2, 0.7];
+params.ylim = [-14, 14;
+    -9, 9];
+params.colours = [0.7882    0.0627    0.1961;
+    0.9412    0.4431    0.4431;
+    0.0510    0.3922    0.6196;
+    0.3020    0.7451    0.9333];
+params.alpha = 0.2;
+% -------------------------
+% update 
+load(output_file, 'RFSxLASER_info');
+cd(folder.processed)
+
+% load a header
+load(sprintf('%s %s %s %s %s.lw6', params.prefix, RFSxLASER_info(1).ID, ...
+    params.stimulus{1}, params.side{1}, params.intensity{1}), '-mat')
+
+% identify EOI
+eoi = find({header.chanlocs.labels}, params.eoi);
+
+% load and sort the data
+fprintf('loading subject ')
+for p = params.subjects
+    fprintf('%d ... ', p)
+    for d = 1:length(params.side)
+        for i = 1:length(params.intensity) 
+            for s = 1:length(params.stimulus)
+                % check if the dataset exists
+                files_available = dir(sprintf('%s*%s*%s*%s*%s*.mat', params.prefix, RFSxLASER_info(p).ID,...
+                    params.stimulus{s}, params.side{d}, params.intensity{i}));
+                if length(files_available) > 1
+                    error('ERROR: too many datasets found for descriptors ''%s'', ''%s'', and ''%s''\n', ...
+                        RFSxLASER_info(p).ID, params.stimulus{s}, params.intensity{i})
+                end
+                if isempty(files_available)
+                    continue
+                end
+    
+                % load the data
+                load(files_available(1).name)
+    
+                % extract mean Cz signal
+                data_all(d, i, s, p, :) = squeeze(mean(data(:, eoi, 1, 1, 1, :), 1));     
+            end
+        end
+    end
+end
+fprintf('done.\n')
+
+% plot a figure for each stimulation intensity (contrast stimulus)
+for i = 1:length(params.intensity) 
+    % extract data for visualization, average across sides
+    data = squeeze(mean(data_all(:, i, :, :, :), 1));
+    visual = create_visual(data, header);
+
+    % plot ERP
+    fig = figure(figure_counter);
+    set(gcf, "Position", [50, 30, 600, 480])
+    plot_ERP(visual, 'confidence', params.confidence, 'xlim', params.xlim, 'ylim', params.ylim(i, :), ...
+        'labels', params.stimulus, 'colours', params.colours((i-1)+[1,3], :), 'inverse', 'on')
+    title(sprintf('Subjects %d - %d: %s intensity stimulation', ...
+        params.subjects(1), params.subjects(end), params.intensity{i}))
+
+    % save figure and update counter
+    saveas(fig, sprintf('%s\\figures\\preliminary_S%d-%d_%s.png', folder.output, params.subjects(1), params.subjects(end), params.intensity{i}))
+    figure_counter = figure_counter + 1;
+end
+
+%%plot a figure for each stimulus (contrast intensity)
+for s = 1:length(params.stimulus) 
+    % extract data for visualization, average across sides
+    data = squeeze(mean(data_all(:, :, s, :, :), 1));
+    visual = create_visual(data, header);
+
+    % plot ERP
+    fig = figure(figure_counter);
+    set(gcf, "Position", [50, 30, 600, 480])
+    plot_ERP(visual, 'confidence', params.confidence, 'xlim', params.xlim, 'ylim', params.ylim(1, :), ...
+        'labels', params.intensity, 'colours', params.colours((s-1)*2+[1,2], :), 'inverse', 'on')
+    title(sprintf('Subjects %d - %d: %s stimulation', ...
+        params.subjects(1), params.subjects(end), params.stimulus{s}))
+
+    % save figure and update counter
+    saveas(fig, sprintf('%s\\figures\\preliminary_S%d-%d_%s.png', folder.output, params.subjects(1), params.subjects(end), params.stimulus{s}))
+    figure_counter = figure_counter + 1;
+end
+clear params p s i d files_available data_all data header visual fig 
+
+%% functions
+function plot_thresholds(visual, threshold)   
+% =========================================================================
+% what does the function do
+% ========================================================================= 
+% plot the line
+plot(visual.x, visual.intensity, ':', 'color', [0.6510    0.6510    0.6510], 'linewidth', 3)
+hold on
+
+% plot the trials
+for e = 1:length(visual.x)
+    plot(visual.x(e), visual.intensity(e), 'o', 'MarkerSize', 12, 'MarkerEdgeColor','none','MarkerFaceColor', visual.color(e, :))
+    hold on
+end
+
+% plot three dummy points (one for each color) for the legend
+h(1) = plot(NaN, NaN, 'o', 'MarkerSize', 12, 'MarkerFaceColor', [0.6510    0.6510    0.6510], 'MarkerEdgeColor', 'none');  
+h(2) = plot(NaN, NaN, 'o', 'MarkerSize', 12, 'MarkerFaceColor', [0    0.4471    0.7412], 'MarkerEdgeColor', 'none');  
+h(3) = plot(NaN, NaN, 'o', 'MarkerSize', 12, 'MarkerFaceColor', [0.8000    0.0157    0.0157], 'MarkerEdgeColor', 'none');  
+h(4) = plot(NaN, NaN, 'o', 'MarkerSize', 12, 'MarkerFaceColor', [0 0 0], 'MarkerEdgeColor', 'none'); 
+
+% identify spans of the axes
+y_lim = get(gca, "YLim");
+y_span = y_lim(2) - y_lim(1);
+x_lim = get(gca, "XLim");
+x_span = x_lim(2) - x_lim(1);
+
+% plot thresholds
+line(0:visual.x(end)+1, repelem(round(mean(threshold.perception), 2), 1, length(visual.x)+2), ...
+    'color', [0    0.4471    0.7412], 'linewidth', 1.5)
+line(0:visual.x(end)+1, repelem(round(mean(threshold.pain), 2), 1, length(visual.x)+2), ...
+    'color', [0.8000    0.0157    0.0157], 'linewidth', 1.5)
+line(0:visual.x(end)+1, repelem(round(mean(threshold.subjective), 2), 1, length(visual.x)+2), ...
+    'color', [0.8000    0.0157    0.0157], 'linewidth', 1.5, 'linestyle', '--')
+
+% plot annotations
+text(0.01*x_span, round(mean(threshold.perception), 2) + 0.02*y_span, ...
+    sprintf('perception: %.2f %s', round(mean(threshold.perception), 2), visual.unit), 'fontsize', 14);
+text(0.01*x_span, round(mean(threshold.pain), 2) + 0.02*y_span, ...
+    sprintf('pain: %.2f %s', round(mean(threshold.pain), 2), visual.unit), 'fontsize', 14);
+text(0.01*x_span, round(mean(threshold.subjective), 2) + 0.02*y_span, ...
+    sprintf('subjective pain: %.2f %s', round(mean(threshold.subjective), 2), visual.unit), 'fontsize', 14);
+
+% adjust visuals
+xlim([0, visual.x(end)+1]); 
+ylim([0.9*min(visual.intensity), 1.1*max(visual.intensity)])
+xlabel('trials'); 
+ylabel(sprintf('stimulation intensity (%s)', visual.unit));
+set(gca, 'fontsize', 14)
+
+% add the legend
+legend(h, {'not perceived', 'not painful', 'painful', 'electric'}, 'Location', 'northwest', 'Box', 'off');
+end
+function wait4files(filenames)
+% =========================================================================
+% waitForFiles pauses the script until all required files appear in the
+% working working directory
+% --> file names are specified in a cell array
+% =========================================================================    
+% loop to wait for files
+while true
+    allFilesExist = true;
+    
+    % check for each file
+    for i = 1:length(filenames)
+        if isempty(dir(filenames{i}))
+            allFilesExist = false;
+            break;
+        end
+    end
+    
+    % if all files exist, break the loop
+    if allFilesExist
+        break;
+    end
+    
+    % pause for 2s
+    pause(2);
+end
+end
+function visual = create_visual(data, header, varargin)
+% =========================================================================
+% prepares a structure with data ready for ERP plotting
+% --> data must be in matrix format: condition * subject * timepoint
+% =========================================================================  
+% initiate output
+visual = struct;
+
+% extract header parameters
+visual.xstart = header.xstart;
+visual.xstep = header.xstep;
+
+% prepare original x 
+visual.x = header.xstart : header.xstep : (header.datasize(6) * header.xstep)+header.xstart-header.xstep;
+
+% loop through conditions
+for c = 1:size(data, 1)
+    % extract mean data and statistics
+    visual.y(c, :) = squeeze(mean(data(c, :, :), 2));
+
+    % calculate statistics
+    % visual.t = tinv(0.975, size(data, 2) - 1); 
+    visual.SD(c, :) = std(squeeze(data(c, :, :)));
+    visual.SEM(c, :) = visual.SD(c, :) / sqrt(size(visual.y, 2)); 
+    % visual.CI(c, :) = visual.t * visual.SEM(c, :); 
+end
+end
+function plot_ERP(visual, varargin) 
+% =========================================================================
+% plots ERP data
+% =========================================================================  
+% set defaults
+shading = true;
+conf = 'CI';
+x_limits = [visual.x(1), visual.x(end)];
+labels = [];
+for a = 1:size(visual.y, 1)
+    labels{a} = sprintf('dataset %d', a);
+end
+col = parula(size(visual.y, 1));
+alpha = 0.2;
+inverse = false;
+legend_loc = 'northeast';
+
+% check for varargins
+if ~isempty(varargin)
+    % shading 
+    i = find(strcmpi(varargin, 'shading'));
+    if ~isempty(i) && strcmp(varargin{i + 1}, 'off')
+        shading = false;
+    end
+
+    % confidence intervals
+    i = find(strcmpi(varargin, 'confidence'));
+    if ~isempty(i)
+        conf = varargin{i + 1};
+    end
+
+    % inverse y axis
+    i = find(strcmpi(varargin, 'inverse'));
+    if ~isempty(i) && strcmp(varargin{i + 1}, 'on')
+        inverse = true;
+    end
+
+    % x limits
+    i = find(strcmpi(varargin, 'xlim'));
+    if ~isempty(i)
+        x_limits = varargin{i + 1};
+    end
+
+    % y limits
+    i = find(strcmpi(varargin, 'ylim'));
+    if ~isempty(i)
+        y_limits = varargin{i + 1};
+    end
+
+    % labels
+    i = find(strcmpi(varargin, 'labels'));
+    if ~isempty(i)
+        labels = varargin{i + 1};       
+    end
+
+    % colours
+    i = find(strcmpi(varargin, 'colours'));
+    if ~isempty(i)
+        col = varargin{i + 1};
+    end
+
+    % alpha
+    i = find(strcmpi(varargin, 'alpha'));
+    if ~isempty(i)
+        alpha = varargin{i + 1};       
+    end
+
+    % legend location
+    i = find(strcmpi(varargin, 'legend_loc'));
+    if ~isempty(i) 
+        legend_loc = varargin{i + 1};        
+    end        
+end
+
+% shade confidence intervals
+if shading
+    % identify required value
+    statement = sprintf('ci = visual.%s;', conf);
+    eval(statement)
+
+    % plot
+    for a = 1:size(visual.y, 1) 
+        fill([visual.x fliplr(visual.x)], [visual.y(a, :) + ci(a, :) fliplr(visual.y(a, :) - ci(a, :))], ...
+            col(a, :), 'FaceAlpha', alpha, 'linestyle', 'none');
+        hold on
+    end
+end
+
+% plot mean values
+for a = 1:size(visual.y, 1) 
+    P(a) = plot(visual.x, visual.y(a, :), 'Color', col(a, :), 'LineWidth', 2.5);
+    hold on
+end
+
+% deal with limis
+xlim(x_limits)
+if ~exist('y_limits')
+    y_limits = ylim;
+end
+ylim(y_limits)
+
+% plot stimulus
+line([0, 0], y_limits, 'Color', 'black', 'LineWidth', 2.5, 'LineStyle', '--')
+
+% axes
+box off;
+ax = gca;
+ax.XAxisLocation = 'bottom';
+ax.YAxisLocation = 'left';
+ax.TickDir = 'out'; 
+ax.XColor = [0.5020    0.5020    0.5020]; 
+ax.YColor = [0.5020    0.5020    0.5020]; 
+
+% other parameters
+xlabel('time (ms)')
+ylabel(sprintf('amplitude (%sV %s %s)', char(956), char(177), conf))
+set(gca, 'FontSize', 14)
+set(gca, 'Layer', 'Top')
+if inverse
+    set(gca, 'YDir', 'reverse');
+end
+
+% legend
+legend(P, labels, 'Location', legend_loc, 'fontsize', 14)
+legend('boxoff');
+end
