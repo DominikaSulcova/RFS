@@ -39,8 +39,7 @@
 % The third part of the script provides group average visualization and
 % exports the data in appropriate formates for the stat analysis in R.
 
-% ===================== PART 1: experimental session =====================
-%% params  
+%% % ===================== PART 1: experimental session =====================
 clc, clear all
 
 % directories
@@ -58,7 +57,7 @@ figure_counter = 1;
 load handel.mat
 haleluja = y; clear y Fs
 
-%% 1) fill in subject & session info 
+%% fill in subject & session info 
 % ----- section input -----
 params.laser.intensity.low = 1.25;
 params.laser.intensity.high = 1.75;
@@ -120,7 +119,7 @@ save(output_file, 'RFSxLASER_info', '-append');
 clear params output_vars
 
 
-%% 2) run threshold tracking 
+%% run threshold tracking 
 % ----- section input -----
 params.stimulus = {'laser', 'RFS'};
 params.side = {'right', 'left'};
@@ -289,7 +288,7 @@ save(output_file, 'RFSxLASER_info', '-append');
 clear params s a intensity trial_counter continue_trials trial statement open screen_size ...
     intensity_input fig_intensity plot_fig change_tracker flip_counter
 
-%% 3) determine thresholds 
+%% determine thresholds 
 % ----- section input -----
 params.stimulus = {'laser', 'RFS'};
 params.side = {'right', 'left'};
@@ -513,7 +512,7 @@ end
 load handel.mat
 haleluja = y; clear y Fs
 
-%% 1) import data for letswave, preview
+%% import data for letswave, preview
 % ----- section input -----
 params.data = {'RS', 'LEP', 'RFS'};
 params.preview = false;
@@ -527,6 +526,10 @@ params.suffix = 'preview';
 params.eoi = 'Cz';
 params.ylim = [-15 15];
 % -------------------------
+
+% update 
+load(output_file, 'RFSxLASER_info');
+
 % ask for subject number, if not defined
 if ~exist('subject_idx')
     prompt = {'subject number:'};
@@ -538,19 +541,17 @@ if ~exist('subject_idx')
 end
 clear prompt dlgtitle dims definput input
 
-% update the info structure
-load(output_file, 'RFSxLASER_info');
-
 % add letswave 6 to the top of search path
 addpath(genpath([folder.toolbox '\letswave 6']));
    
 % cycle though datasets and import in letswave format
 fprintf('Loading:\n')
-for a = 1:length(params.data)
+for a = 2:length(params.data)
     % identify the appropriate files
     file2import = dir(sprintf('%s\\%s\\%s\\*%s*%s*.vhdr', folder.raw, RFSxLASER_info(subject_idx).ID, params.folder, study, params.data{a}));
 
     % remove average files if necessary
+    file2rmv = logical([]);
     for b = 1:length(file2import)
         if contains(file2import(b).name, 'avg') 
             file2rmv(b) = true;
@@ -562,7 +563,7 @@ for a = 1:length(params.data)
     
     % check that the number of files matches
     if size(file2import, 1) ~= params.data_n
-        error('ERROR: incorrect number (%d) of %s recordings was found!\n', size(file2import, 1), params.data{a})
+        fprintf('WARNING: incorrect number (%d) of %s recordings was found!\n', size(file2import, 1), params.data{a})
     end
 
     % cycle through datasets
@@ -774,7 +775,7 @@ end
 clear params a b c d e f block file2import file2rmv filename dataname underscores events event_n event_code lwdata ...
     data data_visual cfg eoi fig fig_name option screen_size answer preview_save
 
-%% 2) pre-process all data
+%% pre-process all data
 % ----- section input -----
 params.suffix = {'dc' 'bandpass' 'notch' 'ds' 'reref' 'ep' 'dc'};
 params.eventcode = {'S  1', 'S  2'};
@@ -787,7 +788,8 @@ params.interp_chans = 6;
 params.event_n = 30;
 params.epoch = [-0.3 1];
 % -------------------------
-% % update the info structure
+
+% update 
 load(output_file, 'RFSxLASER_info');
 cd(folder.processed)
 
@@ -1157,13 +1159,14 @@ end
 clear params a b c d d_rfs i shift_samples trigger visual event_idx lwdata chans2interpolate chan_n chan_dist chans2use...
     fig option bad_counter bad_idx answer
 
-%% 3) compute ICA
+%% compute ICA
 % preliminary analysis --> only ERPs included
 % ----- section input -----
 params.prefix = 'dc ep reref ds notch bandpass dc';
 params.n_files = 8;
 params.suffix = {'ica'};
 % -------------------------
+
 % update 
 load(output_file, 'RFSxLASER_info');
 cd(folder.processed)
@@ -1268,7 +1271,7 @@ switch answer
 end 
 clear params c d e f i file2process data header filenames ICA psd freq answer
 
-%% 4) encode ICA 
+%% encode ICA 
 % update 
 load(output_file, 'RFSxLASER_info');
 cd(folder.processed)
@@ -1327,6 +1330,7 @@ params.colours = [0.7882    0.0627    0.1961;
     0.3020    0.7451    0.9333];
 params.alpha = 0.2;
 % -------------------------
+
 % update 
 load(output_file, 'RFSxLASER_info');
 cd(folder.processed)
