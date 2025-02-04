@@ -39,9 +39,7 @@
 % The third part of the script provides group average visualization and
 % exports the data in appropriate formates for the stat analysis in R.
 
-%% % ===================== PART 1: experimental session =====================
-clc, clear all
-
+%% % ===================== PART 1: experimental session ====================
 % directories
 folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % MATLAB toolboxes
 folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
@@ -57,7 +55,7 @@ figure_counter = 1;
 load handel.mat
 haleluja = y; clear y Fs
 
-%% fill in subject & session info 
+%% 1) fill in subject & session info 
 % ----- section input -----
 params.laser.intensity.low = 1.25;
 params.laser.intensity.high = 1.75;
@@ -118,8 +116,7 @@ clear session_info
 save(output_file, 'RFSxLASER_info', '-append');
 clear params output_vars
 
-
-%% run threshold tracking 
+%% 2) run threshold tracking 
 % ----- section input -----
 params.stimulus = {'laser', 'RFS'};
 params.side = {'right', 'left'};
@@ -288,7 +285,7 @@ save(output_file, 'RFSxLASER_info', '-append');
 clear params s a intensity trial_counter continue_trials trial statement open screen_size ...
     intensity_input fig_intensity plot_fig change_tracker flip_counter
 
-%% determine thresholds 
+%% 3) determine thresholds 
 % ----- section input -----
 params.stimulus = {'laser', 'RFS'};
 params.side = {'right', 'left'};
@@ -341,6 +338,17 @@ for s = 1:length(params.stimulus)
         option.SelectedVariableNames = {'trial', 'fixation_stopped', 'descriptor', 'pain'};
         ratings_table = readtable(sprintf('%s\\%s', file2import.folder, file2import.name), option);
         clear file2import option
+
+        % get rid of NaNs
+        table_idx = logical([]);
+        for b = 1:height(ratings_table)
+            if isnan(ratings_table.fixation_stopped(b))
+                table_idx(b) = true;
+            else
+                table_idx(b) = false;
+            end
+        end
+        ratings_table(table_idx, :) = [];
     
         % adjust ratings format
         fprintf('extracting trials...\n')
@@ -508,45 +516,40 @@ if ~exist('figure_counter')
     figure_counter = 1;
 end
 
-% sound
-load handel.mat
-haleluja = y; clear y Fs
+% current subject 
+prompt = {'subject number:'};
+dlgtitle = 'subject';
+dims = [1 40];
+definput = {''};
+input = inputdlg(prompt,dlgtitle,dims,definput);
+subject_idx = str2num(input{1,1});
+clear prompt dlgtitle dims definput input
 
-%% import data for letswave, preview
+%% 1) import data for letswave, preview
 % ----- section input -----
 params.data = {'RS', 'LEP', 'RFS'};
-params.preview = false;
+params.preview = true;
 params.folder = 'EEG';
 params.data_n = 4;
 params.event_n = 30;
 params.downsample = 5;
-params.eventcode = {'S  1', 'S  2'};
+params.eventcode = {'L  1', 'R  1'};
 params.epoch = [-0.3 1];
 params.suffix = 'preview';
 params.eoi = 'Cz';
 params.ylim = [-15 15];
 % -------------------------
+fprintf('section 1: data import\n')
 
-% update 
+% update info structure
 load(output_file, 'RFSxLASER_info');
-
-% ask for subject number, if not defined
-if ~exist('subject_idx')
-    prompt = {'subject number:'};
-    dlgtitle = 'subject';
-    dims = [1 40];
-    definput = {''};
-    input = inputdlg(prompt,dlgtitle,dims,definput);
-    subject_idx = str2num(input{1,1});
-end
-clear prompt dlgtitle dims definput input
 
 % add letswave 6 to the top of search path
 addpath(genpath([folder.toolbox '\letswave 6']));
    
 % cycle though datasets and import in letswave format
-fprintf('Loading:\n')
-for a = 2:length(params.data)
+fprintf('loading:\n')
+for a = 1:length(params.data)
     % identify the appropriate files
     file2import = dir(sprintf('%s\\%s\\%s\\*%s*%s*.vhdr', folder.raw, RFSxLASER_info(subject_idx).ID, params.folder, study, params.data{a}));
 
@@ -596,7 +599,7 @@ for a = 2:length(params.data)
         dataset(subject_idx).raw(block - 1).header.name = dataname;
     end
 end
-fprintf('Done.\n')
+fprintf('done.\n')
 
 % save info to the output file
 save(output_file, 'RFSxLASER_info', '-append');
@@ -764,21 +767,15 @@ if params.preview
     saveas(fig, sprintf('%s\\figures\\%s_preview.png', folder.output, RFSxLASER_info(subject_idx).ID))
 end
 
-% ask if the subject is done
-answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
-switch answer
-    case 'NO'
-    case 'YES'
-    	subject_idx = subject_idx + 1;
-end 
-
+% clear and continue
+fprintf('\nsection 1 finished.\n\n')
 clear params a b c d e f block file2import file2rmv filename dataname underscores events event_n event_code lwdata ...
     data data_visual cfg eoi fig fig_name option screen_size answer preview_save
 
-%% pre-process all data
+%% 2) pre-process all data
 % ----- section input -----
 params.suffix = {'dc' 'bandpass' 'notch' 'ds' 'reref' 'ep' 'dc'};
-params.eventcode = {'S  1', 'S  2'};
+params.eventcode = {'L  1', 'R  1'};
 params.eventcode_new = {'laser', 'RFS'};
 params.interpolate = [-0.002 0.02];
 params.shift = 0.002;
@@ -788,21 +785,11 @@ params.interp_chans = 6;
 params.event_n = 30;
 params.epoch = [-0.3 1];
 % -------------------------
+fprintf('section 2: data pre-processing\n')
 
-% update 
+% update info structure
 load(output_file, 'RFSxLASER_info');
 cd(folder.processed)
-
-% ask for subject number, if not defined
-if ~exist('subject_idx')
-    prompt = {'subject number:'};
-    dlgtitle = 'subject';
-    dims = [1 40];
-    definput = {''};
-    input = inputdlg(prompt,dlgtitle,dims,definput);
-    subject_idx = str2num(input{1,1});
-end
-clear prompt dlgtitle dims definput input
 
 % add letswave 6 to the top of search path
 addpath(genpath([folder.toolbox '\letswave 6']));
@@ -814,7 +801,7 @@ visual = struct;
 visual.x = -0.01 : dataset(subject_idx).raw(1).header.xstep : 0.03;
 
 % interpolate RFS artifact and shift
-fprintf('*********** Subject %d: interpolating RF artifact ***********\n', subject_idx)
+fprintf('*********** subject %d: interpolating RF artifact ***********\n', subject_idx)
 d_rfs = 1;      % dataset counter
 for d = 1:length(dataset(subject_idx).raw)
     if contains(dataset(subject_idx).raw(d).header.name, 'RFS')  
@@ -860,9 +847,11 @@ for d = 1:length(dataset(subject_idx).raw)
             RFSxLASER_info(subject_idx).preprocessing(1).process = sprintf('RF artifact interpolated'); 
             RFSxLASER_info(subject_idx).preprocessing(1).params.method = 'pchip';
             RFSxLASER_info(subject_idx).preprocessing(1).params.limits = params.interpolate;
+            RFSxLASER_info(subject_idx).preprocessing(1).suffix = [];
             RFSxLASER_info(subject_idx).preprocessing(1).date = sprintf('%s', date);
             RFSxLASER_info(subject_idx).preprocessing(2).process = sprintf('RF data shifted to correct for trigger delay');
             RFSxLASER_info(subject_idx).preprocessing(2).params.shift = params.shift;
+            RFSxLASER_info(subject_idx).preprocessing(2).suffix = [];
             RFSxLASER_info(subject_idx).preprocessing(2).date = sprintf('%s', date);
         end
         
@@ -873,14 +862,16 @@ end
 fprintf('done.\n')
 fprintf('\n')
 
-% update figure counter 
+% save and update figure counter 
+figure(fig)
+saveas(fig, sprintf('%s\\figures\\%s_RFartifact.png', folder.output, RFSxLASER_info(subject_idx).ID))
 figure_counter = figure_counter + 1;
 
 % add letswave 7 to the top of search path
 addpath(genpath([folder.toolbox '\letswave 7']));
 
 % first step of pre-processing
-fprintf('*********** Subject %d: first pre-processing ***********\n', subject_idx)
+fprintf('*********** subject %d: first pre-processing ***********\n', subject_idx)
 d_rfs = 1;      % RFS counter
 for d = 1:length(dataset(subject_idx).raw)
     % provide update
@@ -905,9 +896,10 @@ for d = 1:length(dataset(subject_idx).raw)
         'suffix', '', 'is_save', 0);
     lwdata = FLW_electrode_location_assign.get_lwdata(lwdata, option);
     if d == 1
-        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('electrode coordinates assigned');
-        RFSxLASER_info(subject_idx).preprocessing(end).params.layout = sprintf('standard 10-20-cap81');
-        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        RFSxLASER_info(subject_idx).preprocessing(3).process = sprintf('electrode coordinates assigned');
+        RFSxLASER_info(subject_idx).preprocessing(3).params.layout = sprintf('standard 10-20-cap81');
+        RFSxLASER_info(subject_idx).preprocessing(3).suffix = [];
+        RFSxLASER_info(subject_idx).preprocessing(3).date = sprintf('%s', date);
     end
     
     % remove DC + linear detrend
@@ -915,8 +907,9 @@ for d = 1:length(dataset(subject_idx).raw)
     option = struct('linear_detrend', 1, 'suffix', params.suffix{1}, 'is_save', 0);
     lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
     if d == 1
-        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('DC + linear detrend on all continuous data');
-        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        RFSxLASER_info(subject_idx).preprocessing(4).process = sprintf('DC + linear detrend on all continuous data');
+        RFSxLASER_info(subject_idx).preprocessing(4).suffix = params.suffix{1};
+        RFSxLASER_info(subject_idx).preprocessing(4).date = sprintf('%s', date);
     end
     
     % bandpass
@@ -925,11 +918,12 @@ for d = 1:length(dataset(subject_idx).raw)
         'filter_order', 4, 'suffix', params.suffix{2}, 'is_save', 0);
     lwdata = FLW_butterworth_filter.get_lwdata(lwdata, option);
     if d == 1
-        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('bandpass filtered');
-        RFSxLASER_info(subject_idx).preprocessing(end).params.method = sprintf('Butterworth');
-        RFSxLASER_info(subject_idx).preprocessing(end).params.order = 4;
-        RFSxLASER_info(subject_idx).preprocessing(end).params.limits = params.bandpass;
-        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        RFSxLASER_info(subject_idx).preprocessing(5).process = sprintf('bandpass filtered');
+        RFSxLASER_info(subject_idx).preprocessing(5).params.method = sprintf('Butterworth');
+        RFSxLASER_info(subject_idx).preprocessing(5).params.order = 4;
+        RFSxLASER_info(subject_idx).preprocessing(5).params.limits = params.bandpass;
+        RFSxLASER_info(subject_idx).preprocessing(5).suffix = params.suffix{2};
+        RFSxLASER_info(subject_idx).preprocessing(5).date = sprintf('%s', date);
     end
     
     % 50 Hz notch
@@ -938,11 +932,12 @@ for d = 1:length(dataset(subject_idx).raw)
         'harmonic_num', 2,'suffix', params.suffix{3},'is_save', 0);
     lwdata = FLW_FFT_filter.get_lwdata(lwdata, option);
     if d == 1
-        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('notch filtered at 50 Hz');
-        RFSxLASER_info(subject_idx).preprocessing(end).params.method = sprintf('FFT');
-        RFSxLASER_info(subject_idx).preprocessing(end).params.width = 2;
-        RFSxLASER_info(subject_idx).preprocessing(end).params.slope = 2;
-        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        RFSxLASER_info(subject_idx).preprocessing(6).process = sprintf('notch filtered at 50 Hz');
+        RFSxLASER_info(subject_idx).preprocessing(6).params.method = sprintf('FFT');
+        RFSxLASER_info(subject_idx).preprocessing(6).params.width = 2;
+        RFSxLASER_info(subject_idx).preprocessing(6).params.slope = 2;
+        RFSxLASER_info(subject_idx).preprocessing(6).suffix = params.suffix{3};
+        RFSxLASER_info(subject_idx).preprocessing(6).date = sprintf('%s', date);
     end
     
     % downsample and save
@@ -950,11 +945,12 @@ for d = 1:length(dataset(subject_idx).raw)
     option = struct('x_dsratio', params.downsample, 'suffix', params.suffix{4}, 'is_save',1);
     lwdata = FLW_downsample.get_lwdata(lwdata, option);
     if d == 1
-        RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('downsampled');
-        RFSxLASER_info(subject_idx).preprocessing(end).params.ratio = params.downsample;
-        RFSxLASER_info(subject_idx).preprocessing(end).params.fs_orig = 1/lwdata.header.xstep;
-        RFSxLASER_info(subject_idx).preprocessing(end).params.fs_final = (1/lwdata.header.xstep)/params.downsample;
-        RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+        RFSxLASER_info(subject_idx).preprocessing(7).process = sprintf('downsampled');
+        RFSxLASER_info(subject_idx).preprocessing(7).params.ratio = params.downsample;
+        RFSxLASER_info(subject_idx).preprocessing(7).params.fs_orig = 1/lwdata.header.xstep * params.downsample;
+        RFSxLASER_info(subject_idx).preprocessing(7).params.fs_final = 1/lwdata.header.xstep;
+        RFSxLASER_info(subject_idx).preprocessing(7).suffix = params.suffix{4};
+        RFSxLASER_info(subject_idx).preprocessing(7).date = sprintf('%s', date);
     end
 
     % update dataset
@@ -1029,16 +1025,21 @@ if ~isempty(chans2interpolate{1})
 
         % update info structure
         if c == 1
-            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('bad channels interpolated');
-            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+            RFSxLASER_info(subject_idx).preprocessing(8).process = sprintf('visual check - bad channels interpolated');
+            RFSxLASER_info(subject_idx).preprocessing(8).suffix = [];
+            RFSxLASER_info(subject_idx).preprocessing(8).date = sprintf('%s', date);
         end
-        RFSxLASER_info(subject_idx).preprocessing(end).params.bad{c} = chans2interpolate{c};
-        RFSxLASER_info(subject_idx).preprocessing(end).params.chans_used{c} = strjoin(chans2use, ' ');    
+        RFSxLASER_info(subject_idx).preprocessing(8).params.bad{c} = chans2interpolate{c};
+        RFSxLASER_info(subject_idx).preprocessing(8).params.chans_used{c} = strjoin(chans2use, ' ');    
     end
+else
+    RFSxLASER_info(subject_idx).preprocessing(8).process = sprintf('visual check');
+    RFSxLASER_info(subject_idx).preprocessing(8).suffix = [];
+    RFSxLASER_info(subject_idx).preprocessing(8).date = sprintf('%s', date);
 end
 
 % segment ERP data
-fprintf('*********** Subject %d: segmenting ERP data ***********\n', subject_idx)
+fprintf('*********** subject %d: segmenting ERP data ***********\n', subject_idx)
 for d = 1:length(dataset(subject_idx).raw)
     if ~contains(dataset(subject_idx).raw(d).header.name, 'RS') 
         % provide update
@@ -1087,25 +1088,20 @@ for d = 1:length(dataset(subject_idx).raw)
 
             % update info structure
             if bad_counter == 1 
-                RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('faulty triggers removed');
-                RFSxLASER_info(subject_idx).preprocessing(end).params.dataset{bad_counter} = dataset(subject_idx).raw(d).header.name;   
-                RFSxLASER_info(subject_idx).preprocessing(end).params.trig_removed{bad_counter} = find(event_idx);
-                RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+                RFSxLASER_info(subject_idx).preprocessing(9).process = sprintf('faulty triggers removed');
+                RFSxLASER_info(subject_idx).preprocessing(9).suffix = [];
+                RFSxLASER_info(subject_idx).preprocessing(9).date = sprintf('%s', date);
             else
-                % identify the correct entry
-                for i = 1:length(RFSxLASER_info(subject_idx).preprocessing)
-                    if contains(RFSxLASER_info(subject_idx).preprocessing(i).process, 'faulty trigger')
-                        bad_idx = i;
-                    end
-                end
-
-                % update the entry
-                RFSxLASER_info(subject_idx).preprocessing(bad_idx).params.dataset{bad_counter} = dataset(subject_idx).raw(d).header.name;   
-                RFSxLASER_info(subject_idx).preprocessing(endbad_idx).params.trig_removed{bad_counter} = find(event_idx);
+                RFSxLASER_info(subject_idx).preprocessing(9).params.dataset{bad_counter} = dataset(subject_idx).raw(d).header.name;   
+                RFSxLASER_info(subject_idx).preprocessing(9).params.trig_removed{bad_counter} = find(event_idx);
             end
 
             % update bad counter
             bad_counter = bad_counter + 1;
+        else
+            RFSxLASER_info(subject_idx).preprocessing(9).process = sprintf('no faulty triggers removed');
+            RFSxLASER_info(subject_idx).preprocessing(9).suffix = [];
+            RFSxLASER_info(subject_idx).preprocessing(9).date = sprintf('%s', date);
         end
 
         % re-reference to common average
@@ -1114,8 +1110,9 @@ for d = 1:length(dataset(subject_idx).raw)
             'apply_list', {{lwdata.header.chanlocs(1:length(lwdata.header.chanlocs)).labels}}, 'suffix', params.suffix{5}, 'is_save', 0);
         lwdata = FLW_rereference.get_lwdata(lwdata, option);
         if d == 1
-            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('ERP data re-referenced to common average');
-            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+            RFSxLASER_info(subject_idx).preprocessing(10).process = sprintf('ERP data re-referenced to common average');
+            RFSxLASER_info(subject_idx).preprocessing(10).suffix = params.suffix{5};
+            RFSxLASER_info(subject_idx).preprocessing(10).date = sprintf('%s', date);
         end
 
         % segment
@@ -1124,9 +1121,10 @@ for d = 1:length(dataset(subject_idx).raw)
             'x_duration', params.epoch(2)-params.epoch(1), 'suffix', params.suffix{6}, 'is_save', 0);
         lwdata = FLW_segmentation.get_lwdata(lwdata, option);
         if d == 1
-            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('ERP data segmented');
-            RFSxLASER_info(subject_idx).preprocessing(end).params.limits = params.epoch;
-            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+            RFSxLASER_info(subject_idx).preprocessing(11).process = sprintf('ERP data segmented');
+            RFSxLASER_info(subject_idx).preprocessing(11).params.limits = params.epoch;
+            RFSxLASER_info(subject_idx).preprocessing(11).suffix = params.suffix{6};
+            RFSxLASER_info(subject_idx).preprocessing(11).date = sprintf('%s', date);
         end
     
         % remove DC + linear detrend
@@ -1134,8 +1132,9 @@ for d = 1:length(dataset(subject_idx).raw)
         option = struct('linear_detrend', 1, 'suffix', params.suffix{7}, 'is_save', 1);
         lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
         if d == 1
-            RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('DC + linear detrend on ERP epochs');
-            RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+            RFSxLASER_info(subject_idx).preprocessing(12).process = sprintf('DC + linear detrend on ERP epochs');
+            RFSxLASER_info(subject_idx).preprocessing(12).suffix = params.suffix{7};
+            RFSxLASER_info(subject_idx).preprocessing(12).date = sprintf('%s', date);
         end
 
         % update dataset
@@ -1144,137 +1143,246 @@ for d = 1:length(dataset(subject_idx).raw)
     end
 end
 fprintf('done.\n')
-fprintf('\n')
 
 % save to the output file
 save(output_file, 'RFSxLASER_info', '-append');
 
-% ask if the subject is done
-answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
-switch answer
-    case 'NO'
-    case 'YES'
-    	subject_idx = subject_idx + 1;
-end 
+% clear and continue
+fprintf('\nsection 2 finished.\n\n')
 clear params a b c d d_rfs i shift_samples trigger visual event_idx lwdata chans2interpolate chan_n chan_dist chans2use...
     fig option bad_counter bad_idx answer
 
-%% compute ICA
-% preliminary analysis --> only ERPs included
+%% 3) discard bad trials 
 % ----- section input -----
 params.prefix = 'dc ep reref ds notch bandpass dc';
 params.n_files = 8;
-params.suffix = {'ica'};
+params.suffix = 'ar';
 % -------------------------
+fprintf('section 3: bad trials\n')
 
-% update 
+% update info structure
 load(output_file, 'RFSxLASER_info');
-cd(folder.processed)
 
-% ask for subject number
-if ~exist('subject_idx')
-    prompt = {'subject number:'};
-    dlgtitle = 'subject';
-    dims = [1 40];
-    definput = {''};
-    input = inputdlg(prompt,dlgtitle,dims,definput);
-    subject_idx = str2num(input{1,1});
-end
-clear prompt dlgtitle dims definput input
-
-% define the datasets with associated ICA matrix
+% define the names of checked files
 file2process = dir(sprintf('*%s*%s*.mat', params.prefix, RFSxLASER_info(subject_idx).ID));
 if length(file2process) == params.n_files
     for i = 1:length(file2process)
-        filenames{i} = sprintf('%s %s',params.suffix{1}, file2process(i).name);
+        filenames{i} = sprintf('%s %s',params.suffix, file2process(i).name);
     end
 else
-    error('ERROR: Incorrect number of datasets for ICA found in the directory: %d\n', length(file2process));
+    error('ERROR: Incorrect number of datasets found in the directory: %d\n', length(file2process));
 end
 
-% open letswave and manually run ICA
-fprintf('OK, run the ICA now!\n')
+% open letswave if not already open
+fprintf('opening letswave:\n')
 addpath(genpath([folder.toolbox '\letswave 6']));
-letswave
+fig_all = findall(0, 'Type', 'figure');
+open = true;
+for f = 1:length(fig_all)
+    if contains(get(fig_all(f), 'Name'), 'Letswave', 'IgnoreCase', true)
+        open = false;
+        break;
+    end
+end
+if open
+    letswave
+end
 
 % wait until all files are processed
 wait4files(filenames);
 
-% extract ICA matrices 
-fprintf('extracting ICA matrices...\n')
-load(sprintf('%s %slw6',params.suffix{1}, file2process(1).name(1:end-3)), '-mat');
-ICA.matrix = header.history(end).configuration.parameters.ICA_mm;
-ICA.unmix = header.history(end).configuration.parameters.ICA_um;
-ICA.chanlocs = header.chanlocs;
-for i = 1:size(ICA.unmix, 1)
-    ICA.labels{i} = ['IC',num2str(i)];
+% load dataset with bad trials removed
+fprintf('updating dataset... ')
+if exist('dataset') ~= 1
+    % load checked data
+    data2load = dir(sprintf('%s*%s*', params.suffix, RFSxLASER_info(subject_idx).ID));
+    dataset = reload_dataset(data2load, subject_idx, 'checked');
+else
+    % append checked dataset
+    dataset_old = dataset;
+    data2load = dir(sprintf('%s*%s*', params.suffix, RFSxLASER_info(subject_idx).ID));
+    dataset = reload_dataset(data2load, subject_idx, 'checked');
+    dataset_new = dataset;
+    [dataset_old.checked] = dataset_new.checked;
+    dataset = dataset_old;
+    clear dataset_old dataset_new
 end
-ICA.fs = 1/header.xstep;
+fprintf('done.\n')
+
+% encode bad trials
+fprintf('encoding bad trials... ')
+RFSxLASER_info(subject_idx).preprocessing(13).process = sprintf('bad trials discarded');
+RFSxLASER_info(subject_idx).preprocessing(13).params.GUI = 'letswave';
+RFSxLASER_info(subject_idx).preprocessing(13).suffix = params.suffix;
+RFSxLASER_info(subject_idx).preprocessing(13).date = sprintf('%s', date);
+for a = 1:length(dataset(subject_idx).checked)
+    % subset header
+    header = dataset(subject_idx).checked(a).header;
+
+    % extract discarded expochs
+    if ~isempty(header.history(end).configuration)
+        if ~isempty(header.history(end).configuration.parameters.rejected_epochs)
+            discarded = header.history(end).configuration.parameters.rejected_epochs;
+        else
+            discarded = [];
+        end
+    end
+
+    % encode 
+    RFSxLASER_info(subject_idx).preprocessing(13).params.discarded(a).dataset = extractAfter(header.name, sprintf('%s ', RFSxLASER_info(subject_idx).ID));
+    RFSxLASER_info(subject_idx).preprocessing(13).params.discarded(a).trials = discarded;
+    RFSxLASER_info(subject_idx).preprocessing(13).params.kept(a).dataset = extractAfter(header.name, sprintf('%s ', RFSxLASER_info(subject_idx).ID));
+    RFSxLASER_info(subject_idx).preprocessing(13).params.kept(a).trials = header.datasize(1);
+end
+fprintf('done.\n')
+
+% save to the output file
+save(output_file, 'RFSxLASER_info', '-append');
+
+% clear and continue
+fprintf('\nsection 3 finished.\n\n')
+clear params a f i file2process filenames fig_all open header data2load discarded
+
+%% 4) compute ICA
+% ----- section input -----
+params.prefix = 'ar dc ep reref ds notch bandpass dc';
+params.suffix = 'ica';
+params.ICA_comp = 30;
+% -------------------------
+fprintf('section 4: compute ICA\n')
+
+% update info structure
+load(output_file, 'RFSxLASER_info');
+
+% load dataset if needed
+if exist('dataset') ~= 1
+    fprintf('re-loading dataset... ')
+    data2load = dir(sprintf('%s*%s*', params.prefix, RFSxLASER_info(subject_idx).ID));
+    dataset = reload_dataset(data2load, params.condition, 'processed');
+    fprintf('done.\n')
+end
+
+% add letswave 7 to the top of search path
+addpath(genpath([folder.toolbox '\letswave 7']));
+
+% select dataset
+lwdataset = dataset(subject_idx).checked;
+
+% compute ICA and save  
+fprintf('computing ICA matrix:\n')
+option = struct('ICA_mode', 2, 'algorithm', 1, 'num_ICs', params.ICA_comp, 'suffix', params.suffix, 'is_save', 1);
+lwdataset = FLW_compute_ICA_merged.get_lwdataset(lwdataset, option);
+fprintf('done.\n')
+
+% extract ICA parameters
+matrix.mix = lwdataset(1).header.history(end).option.mix_matrix;
+matrix.unmix = lwdataset(1).header.history(end).option.unmix_matrix;    
+params.ICA_chanlocs = lwdataset(1).header.chanlocs;
+for i = 1:size(matrix.mix, 2)
+    params.ICA_labels{i} = ['IC',num2str(i)];
+end
+params.ICA_SR = 1/lwdataset(1).header.xstep;
+
+% update dataset and adjust for letswave 6
+dataset(subject_idx).ica = lwdataset;
+for a = 1:length(dataset(subject_idx).ica)
+    dataset(subject_idx).ica(a).header.history(11).configuration.gui_info.function_name = 'LW_ICA_compute_merged';  
+    dataset(subject_idx).ica(a).header.history(11).configuration.parameters = dataset(subject_idx).ica(a).header.history(11).option;  
+    [dataset(subject_idx).ica(a).header.history(11).configuration.parameters.ICA_um] = dataset(subject_idx).ica(a).header.history(11).configuration.parameters.unmix_matrix; 
+    [dataset(subject_idx).ica(a).header.history(11).configuration.parameters.ICA_mm] = dataset(subject_idx).ica(a).header.history(11).configuration.parameters.mix_matrix; 
+    dataset(subject_idx).ica(a).header.history(11).configuration.parameters = rmfield(dataset(subject_idx).ica(a).header.history(11).configuration.parameters, {'unmix_matrix' 'mix_matrix'});
+    header = dataset(subject_idx).ica(a).header;
+    save(sprintf('%s.lw6', dataset(subject_idx).ica(a).header.name), 'header');
+end
 
 % unmix data
-ICA.data = [];
-fprintf('unmixing the data: dataset ')
-for d = 1:length(filenames)
-    fprintf('%d ...', d)
-    load(filenames{d});
-    for e = 1:size(data, 1)
-        ICA.data(end + 1, :, :) = ICA.unmix * squeeze(data(e, :, 1, 1, 1, :));        
+for b = 1:length(dataset(subject_idx).ica)
+    for e = 1:size(dataset(subject_idx).ica(b).data, 1)
+        dataset(subject_idx).unmixed(b).header = dataset(subject_idx).ica(b).header;
+        dataset(subject_idx).unmixed(b).data(e, :, 1, 1, 1, :) = matrix.unmix * squeeze(dataset(subject_idx).ica(b).data(e, :, 1, 1, 1, :));        
     end
 end
-ICA.data = permute(ICA.data, [2, 1, 3]);
-fprintf('\n')
 
-% calculate spectral content for each 
+% update info structure
+RFSxLASER_info(subject_idx).preprocessing(14).process = 'ICA matrix computed';
+RFSxLASER_info(subject_idx).preprocessing(14).params.method = 'runica';
+RFSxLASER_info(subject_idx).preprocessing(14).params.components = params.ICA_comp;
+RFSxLASER_info(subject_idx).preprocessing(14).params.chanlocs = params.ICA_chanlocs;
+RFSxLASER_info(subject_idx).preprocessing(14).params.labels = params.ICA_labels;
+RFSxLASER_info(subject_idx).preprocessing(14).params.SR = params.ICA_SR;
+RFSxLASER_info(subject_idx).preprocessing(14).params.matrix = matrix;
+RFSxLASER_info(subject_idx).preprocessing(14).suffix = params.suffix;
+RFSxLASER_info(subject_idx).preprocessing(14).date = sprintf('%s', date);
+
+% calculate PSD across all timepoints, components and trials 
 fprintf('estimating spectral content...\n')
-for c = 1:size(ICA.data, 1)
-    for e = 1:size(ICA.data, 2)
-        [psd(c, e, :), freq] = pwelch(squeeze(ICA.data(c, e, :)), [], [], [], ICA.fs);  
+for c = 1:length(dataset(subject_idx).ica)
+    for d = 1:params.ICA_comp
+        for e = 1:size(dataset(subject_idx).unmixed(c).data, 1)
+            [psd(c, d, e, :), freq] = pwelch(squeeze(dataset(subject_idx).unmixed(c).data(e, d, 1, 1, 1, :)), ...
+                [], [], [], RFSxLASER_info(subject_idx).preprocessing(14).params.SR);  
+        end
     end
 end
-ICA.psd = squeeze(mean(psd, 2));
+psd = squeeze(mean(psd, [1, 3]));
+RFSxLASER_info(subject_idx).preprocessing(14).params.PSD = psd;
+RFSxLASER_info(subject_idx).preprocessing(14).params.freq = freq;
 fprintf('done.\n')
 
 % plot component topographies and spectral content
 figure('units','normalized','outerposition',[0 0 1 1]);
 hold on
-for f = 1:size(ICA.unmix, 1)
+for f = 1:params.ICA_comp
     % plot the topography
-    subplot(size(ICA.unmix, 1)/3, 6, (f-1)*2 + 1);
-    topoplot(ICA.matrix(:, f), ICA.chanlocs, 'maplimits', [-4 4], 'shading', 'interp', 'whitebk', 'on', 'electrodes', 'off')
+    labels = {dataset(subject_idx).ica(1).header.chanlocs.labels};
+    subplot(ceil(params.ICA_comp/3), 6, (f-1)*2 + 1);
+    topoplot(double(matrix.mix(:, f)'), params.ICA_chanlocs, 'maplimits', [-4 4], 'shading', 'interp', 'whitebk', 'on', 'electrodes', 'off')
     set(gca,'color',[1 1 1]);
-    title(ICA.labels{f})
+    title(params.ICA_labels{f})
 
     % plot the psd
-    subplot(size(ICA.unmix, 1)/3, 6, (f-1)*2 + 2);
-    plot(freq(1:21), ICA.psd(f, 1:21));
+    subplot(ceil(params.ICA_comp/3), 6, (f-1)*2 + 2);
+    plot(freq(1:33), psd(f, 1:33));
     xlabel('Frequency (Hz)');
     ylabel('Power (dB)');
 end
-saveas(gcf, sprintf('%s\\figures\\ICA_%s.png', folder.output, RFSxLASER_info(subject_idx).ID));
+sgtitle(sprintf('%s - ICA components', RFSxLASER_info(subject_idx).ID))
+saveas(gcf, sprintf('%s\\figures\\%s_ICA.png', folder.output, RFSxLASER_info(subject_idx).ID))
+figure_counter = figure_counter + 1;
 
-% udate and save info structure
-RFSxLASER_info(subject_idx).preprocessing(end+1).process = sprintf('ERP data filtered using ICA');
-RFSxLASER_info(subject_idx).preprocessing(end).params.n_components = size(ICA.unmix, 1);
-RFSxLASER_info(subject_idx).preprocessing(end).params.matrix = ICA.matrix;
-RFSxLASER_info(subject_idx).preprocessing(end).params.unmix = ICA.unmix;
-RFSxLASER_info(subject_idx).preprocessing(end).params.psd = ICA.psd;
-RFSxLASER_info(subject_idx).preprocessing(end).params.freq = freq;
-RFSxLASER_info(subject_idx).preprocessing(end).date = sprintf('%s', date);
+% open letswave if not already open
+fprintf('opening letswave:\n')
+addpath(genpath([folder.toolbox '\letswave 6']));
+fig_all = findall(0, 'Type', 'figure');
+open = true;
+for f = 1:length(fig_all)
+    if contains(get(fig_all(f), 'Name'), 'Letswave', 'IgnoreCase', true)
+        open = false;
+        break;
+    end
+end
+if open
+    letswave
+end
+
+% save to the output file
 save(output_file, 'RFSxLASER_info', '-append');
 
-% ask if the subject is done
-answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
-switch answer
-    case 'NO'
-    case 'YES'
-    	subject_idx = subject_idx + 1;
-end 
-clear params c d e f i file2process data header filenames ICA psd freq answer
+% clear and continue
+fprintf('\nsection 4 finished.\nproceed to ICA\n\n')
+clear params data2load lwdataset option a b c d e f i matrix header psd freq labels fig_all open
 
-%% encode ICA 
-% update 
+%% 5) encode ICA
+% ----- section input -----
+params.suffix = 'icfilt';
+params.ICA_comp = 30;
+params.plot_toi = [-0.1 0.5];
+params.eoi = 'Cz';
+% -------------------------
+fprintf('section 5: encode ICA\n')
+ 
+% update info structure
 load(output_file, 'RFSxLASER_info');
-cd(folder.processed)
 
 % ask for subject number if necessary
 if ~exist('subject_idx')
@@ -1287,22 +1395,27 @@ if ~exist('subject_idx')
 end
 clear prompt dlgtitle dims definput input
 
-% encode ICA outcome
-prompt = {'blinks:', 'horizontal:', 'muscles:', 'electrode noise:'};
-dlgtitle = 'ICA';
-dims = [1 40];
+% ask for input 
+prompt = {'blinks:', 'horizontal:', 'muscles:', 'electrode:'};
+dlgtitle = 'ICA';  
+dims = [1 60];
 definput = {'', '', '', ''};
 input = inputdlg(prompt,dlgtitle,dims,definput);
-RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_kept = RFSxLASER_info(subject_idx).preprocessing(end).params.n_components...
-    - length([str2num(input{1}), str2num(input{2}), str2num(input{3}), str2num(input{4})]);
-RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_removed.blinks = str2num(input{1});
-RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_removed.horizontal = str2num(input{2});
-RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_removed.muscles = str2num(input{3});
-RFSxLASER_info(subject_idx).preprocessing(end).params.ICs_removed.electrodes = str2num(input{4});
-clear prompt dlgtitle dims definput input
 
-% save info structure 
-save(output_file, 'RFSxLASER_info', '-append');
+% encode & save 
+RFSxLASER_info(subject_idx).preprocessing(15).process = 'artifactual ICs discarded';
+RFSxLASER_info(subject_idx).preprocessing(15).suffix = params.suffix;
+RFSxLASER_info(subject_idx).preprocessing(15).date = sprintf('%s', date);
+RFSxLASER_info(subject_idx).preprocessing(15).params.kept = params.ICA_comp - length([str2num(input{1}), str2num(input{2}), str2num(input{3}), str2num(input{4})]);
+RFSxLASER_info(subject_idx).preprocessing(15).params.removed.blinks = str2num(input{1});
+RFSxLASER_info(subject_idx).preprocessing(15).params.removed.horizontal = str2num(input{2});
+RFSxLASER_info(subject_idx).preprocessing(15).params.removed.muscles = str2num(input{3});
+RFSxLASER_info(subject_idx).preprocessing(15).params.removed.electrode = str2num(input{4});
+save(output_file, 'RFSxLASER_info', '-append')
+
+% clear and continue
+fprintf('\nsection 5 finished.\n\n')
+clear params data2load prompt dlgtitle dims definput input 
 
 % ask if the subject is done
 answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
@@ -1311,6 +1424,33 @@ switch answer
     case 'YES'
     	subject_idx = subject_idx + 1;
 end 
+clear answer
+
+%% ===================== PART 3: group visualization & export for statistics ================
+% directories
+if ~exist('folder') 
+    folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % MATLAB toolboxes
+    folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
+    folder.output = uigetdir(pwd, 'Choose the OneDrive folder');    % output folder --> figures, loutput file, exports 
+end
+folder.processed = uigetdir(pwd, 'Choose the data folder');         % processed data --> wherever you want to store the voluminous EEG data
+cd(folder.output)
+
+% output
+study = 'RFSxLASER';
+output_file = sprintf('%s\\%s_output.mat', folder.output, study);
+if ~exist('figure_counter')  
+    figure_counter = 1;
+end
+
+% current subject 
+prompt = {'subject number:'};
+dlgtitle = 'subject';
+dims = [1 40];
+definput = {''};
+input = inputdlg(prompt,dlgtitle,dims,definput);
+subject_idx = str2num(input{1,1});
+clear prompt dlgtitle dims definput input
 
 %% ERP visualization
 % ----- section input -----
@@ -1462,6 +1602,49 @@ set(gca, 'fontsize', 14)
 
 % add the legend
 legend(h, {'not perceived', 'not painful', 'painful', 'electric'}, 'Location', 'northwest', 'Box', 'off');
+end
+function dataset = reload_dataset(data2load, subject_idx, fieldname)
+% =========================================================================
+% Reloads pre-processed EEG data of a single subject for following 
+% processing steps. 
+% Input:    - list of datasets to loads
+%           - subject index
+%           - fieldname
+% =========================================================================  
+% initiate output
+dataset = struct;
+
+% subset header and data files
+header_idx = logical([]);
+data_idx = logical([]);
+for d = 1:length(data2load)
+    if contains(data2load(d).name, 'lw6') 
+        header_idx(d) = true;
+        data_idx(d) = false;
+    elseif contains(data2load(d).name, 'mat') 
+        header_idx(d) = false;
+        data_idx(d) = true;
+    end
+end
+headers = data2load(header_idx);
+datas = data2load(data_idx);
+
+% load all dataset for this condition
+if length(datas) == length(headers) 
+    for d = 1:length(datas)
+        % load header
+        load(sprintf('%s\\%s', headers(d).folder, headers(d).name), '-mat')
+        statement = sprintf('dataset(%d).%s(d).header = header;', subject_idx, fieldname);
+        eval(statement) 
+
+        % load data
+        load(sprintf('%s\\%s', datas(d).folder, datas(d).name))
+        statement = sprintf('dataset(%d).%s(d).data = data;', subject_idx, fieldname);
+        eval(statement) 
+    end
+else
+    error('ERROR: Wrong number of available datasets to load! Check manually.')
+end
 end
 function wait4files(filenames)
 % =========================================================================
