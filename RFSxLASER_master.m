@@ -1040,6 +1040,7 @@ end
 
 % segment ERP data
 fprintf('*********** subject %d: segmenting ERP data ***********\n', subject_idx)
+bad_counter = 1;
 for d = 1:length(dataset(subject_idx).raw)
     if ~contains(dataset(subject_idx).raw(d).header.name, 'RS') 
         % provide update
@@ -1068,7 +1069,6 @@ for d = 1:length(dataset(subject_idx).raw)
         % check event number
         fprintf('%d %s stimuli found.\n', length(lwdata.header.events), lwdata.header.events(1).code)
         event_idx = false(1, length(lwdata.header.events));
-        bad_counter = 1;
         if length(lwdata.header.events) > params.event_n
             % ask which events should be removed
             prompt = {sprintf('More than %d events were found\n. Which should be removed?', params.event_n)};
@@ -1080,9 +1080,6 @@ for d = 1:length(dataset(subject_idx).raw)
             % update index
             event_idx(str2num(input{1,1})) = true;
 
-            % clean up
-            clear prompt dlgtitle dims definput input
-
             % remove faulty events
             lwdata.header.events(event_idx) = [];
 
@@ -1091,17 +1088,14 @@ for d = 1:length(dataset(subject_idx).raw)
                 RFSxLASER_info(subject_idx).preprocessing(9).process = sprintf('faulty triggers removed');
                 RFSxLASER_info(subject_idx).preprocessing(9).suffix = [];
                 RFSxLASER_info(subject_idx).preprocessing(9).date = sprintf('%s', date);
-            else
-                RFSxLASER_info(subject_idx).preprocessing(9).params.dataset{bad_counter} = dataset(subject_idx).raw(d).header.name;   
-                RFSxLASER_info(subject_idx).preprocessing(9).params.trig_removed{bad_counter} = find(event_idx);
+            end
+            RFSxLASER_info(subject_idx).preprocessing(9).params(bad_counter).dataset = extractAfter(dataset(subject_idx).raw(d).header.name, sprintf('%s ', RFSxLASER_info(subject_idx).ID));    
+            if ~isempty(str2num(input{1,1}))
+                RFSxLASER_info(subject_idx).preprocessing(9).params(bad_counter).trig_removed = find(event_idx);
             end
 
             % update bad counter
             bad_counter = bad_counter + 1;
-        else
-            RFSxLASER_info(subject_idx).preprocessing(9).process = sprintf('no faulty triggers removed');
-            RFSxLASER_info(subject_idx).preprocessing(9).suffix = [];
-            RFSxLASER_info(subject_idx).preprocessing(9).date = sprintf('%s', date);
         end
 
         % re-reference to common average
@@ -1142,6 +1136,11 @@ for d = 1:length(dataset(subject_idx).raw)
         dataset(subject_idx).preprocessed(d).data = lwdata.data; 
     end
 end
+if isempty(RFSxLASER_info(subject_idx).preprocessing(9).process)        
+    RFSxLASER_info(subject_idx).preprocessing(9).process = sprintf('no faulty triggers removed');
+    RFSxLASER_info(subject_idx).preprocessing(9).suffix = [];
+    RFSxLASER_info(subject_idx).preprocessing(9).date = sprintf('%s', date);
+end
 fprintf('done.\n')
 
 % save to the output file
@@ -1150,7 +1149,7 @@ save(output_file, 'RFSxLASER_info', '-append');
 % clear and continue
 fprintf('\nsection 2 finished.\n\n')
 clear params a b c d d_rfs i shift_samples trigger visual event_idx lwdata chans2interpolate chan_n chan_dist chans2use...
-    fig option bad_counter bad_idx answer
+    fig option bad_counter bad_idx answer prompt dlgtitle dims definput input
 
 %% 3) discard bad trials 
 % ----- section input -----
