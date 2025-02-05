@@ -1103,7 +1103,7 @@ for d = 1:length(dataset(subject_idx).raw)
         option = struct('reference_list', {{lwdata.header.chanlocs(1:length(lwdata.header.chanlocs)).labels}}, ...
             'apply_list', {{lwdata.header.chanlocs(1:length(lwdata.header.chanlocs)).labels}}, 'suffix', params.suffix{5}, 'is_save', 0);
         lwdata = FLW_rereference.get_lwdata(lwdata, option);
-        if d == 1
+        if d == 3
             RFSxLASER_info(subject_idx).preprocessing(10).process = sprintf('ERP data re-referenced to common average');
             RFSxLASER_info(subject_idx).preprocessing(10).suffix = params.suffix{5};
             RFSxLASER_info(subject_idx).preprocessing(10).date = sprintf('%s', date);
@@ -1114,7 +1114,7 @@ for d = 1:length(dataset(subject_idx).raw)
         option = struct('event_labels', {lwdata.header.events(1).code}, 'x_start', params.epoch(1), 'x_end', params.epoch(2), ...
             'x_duration', params.epoch(2)-params.epoch(1), 'suffix', params.suffix{6}, 'is_save', 0);
         lwdata = FLW_segmentation.get_lwdata(lwdata, option);
-        if d == 1
+        if d == 3
             RFSxLASER_info(subject_idx).preprocessing(11).process = sprintf('ERP data segmented');
             RFSxLASER_info(subject_idx).preprocessing(11).params.limits = params.epoch;
             RFSxLASER_info(subject_idx).preprocessing(11).suffix = params.suffix{6};
@@ -1125,7 +1125,7 @@ for d = 1:length(dataset(subject_idx).raw)
         fprintf('removing DC and applying linear detrend...\n')
         option = struct('linear_detrend', 1, 'suffix', params.suffix{7}, 'is_save', 1);
         lwdata = FLW_dc_removal.get_lwdata(lwdata, option);
-        if d == 1
+        if d == 3
             RFSxLASER_info(subject_idx).preprocessing(12).process = sprintf('DC + linear detrend on ERP epochs');
             RFSxLASER_info(subject_idx).preprocessing(12).suffix = params.suffix{7};
             RFSxLASER_info(subject_idx).preprocessing(12).date = sprintf('%s', date);
