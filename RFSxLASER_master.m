@@ -1163,7 +1163,7 @@ fprintf('section 3: bad trials\n')
 load(output_file, 'RFSxLASER_info');
 
 % define the names of checked files
-file2process = dir(sprintf('*%s*%s*.mat', params.prefix, RFSxLASER_info(subject_idx).ID));
+file2process = dir(sprintf('%s*%s*.mat', params.prefix, RFSxLASER_info(subject_idx).ID));
 if length(file2process) == params.n_files
     for i = 1:length(file2process)
         filenames{i} = sprintf('%s %s',params.suffix, file2process(i).name);
@@ -1173,7 +1173,6 @@ else
 end
 
 % open letswave if not already open
-fprintf('opening letswave:\n')
 addpath(genpath([folder.toolbox '\letswave 6']));
 fig_all = findall(0, 'Type', 'figure');
 open = true;
@@ -1184,6 +1183,7 @@ for f = 1:length(fig_all)
     end
 end
 if open
+    fprintf('opening letswave:\n')
     letswave
 end
 
@@ -1350,7 +1350,6 @@ saveas(gcf, sprintf('%s\\figures\\%s_ICA.png', folder.output, RFSxLASER_info(sub
 figure_counter = figure_counter + 1;
 
 % open letswave if not already open
-fprintf('opening letswave:\n')
 addpath(genpath([folder.toolbox '\letswave 6']));
 fig_all = findall(0, 'Type', 'figure');
 open = true;
@@ -1361,6 +1360,7 @@ for f = 1:length(fig_all)
     end
 end
 if open
+    fprintf('opening letswave:\n')
     letswave
 end
 
