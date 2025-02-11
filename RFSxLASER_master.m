@@ -1041,10 +1041,10 @@ end
 % segment ERP data
 fprintf('*********** subject %d: segmenting ERP data ***********\n', subject_idx)
 bad_counter = 1;
-for d = 1:length(dataset(subject_idx).raw)
-    if ~contains(dataset(subject_idx).raw(d).header.name, 'RS') 
+for d = 1:length(dataset(subject_idx).preprocessed)
+    if ~contains(dataset(subject_idx).preprocessed(d).header.name, 'RS') 
         % provide update
-        fprintf('%s:\n', dataset(subject_idx).raw(d).header.name(6:end))
+        fprintf('%s:\n', dataset(subject_idx).preprocessed(d).header.name(27:end))
 
         % select data
         lwdata.header = dataset(subject_idx).preprocessed(d).header;
@@ -1072,7 +1072,7 @@ for d = 1:length(dataset(subject_idx).raw)
         if length(lwdata.header.events) > params.event_n
             % ask which events should be removed
             prompt = {sprintf('More than %d events were found\n. Which should be removed?', params.event_n)};
-            dlgtitle = sprintf('%s', dataset(subject_idx).raw(d).header.name);
+            dlgtitle = sprintf('%s', dataset(subject_idx).preprocessed(d).header.name(27:end));
             dims = [1 40];
             definput = {''};
             input = inputdlg(prompt,dlgtitle,dims,definput);
@@ -1089,7 +1089,7 @@ for d = 1:length(dataset(subject_idx).raw)
                 RFSxLASER_info(subject_idx).preprocessing(9).suffix = [];
                 RFSxLASER_info(subject_idx).preprocessing(9).date = sprintf('%s', date);
             end
-            RFSxLASER_info(subject_idx).preprocessing(9).params(bad_counter).dataset = extractAfter(dataset(subject_idx).raw(d).header.name, sprintf('%s ', RFSxLASER_info(subject_idx).ID));    
+            RFSxLASER_info(subject_idx).preprocessing(9).params(bad_counter).dataset = extractAfter(dataset(subject_idx).preprocessed(d).header.name, sprintf('%s ', RFSxLASER_info(subject_idx).ID));    
             if ~isempty(str2num(input{1,1}))
                 RFSxLASER_info(subject_idx).preprocessing(9).params(bad_counter).trig_removed = find(event_idx);
             end
@@ -1161,6 +1161,7 @@ fprintf('section 3: bad trials\n')
 
 % update info structure
 load(output_file, 'RFSxLASER_info');
+cd(folder.processed)
 
 % define the names of checked files
 file2process = dir(sprintf('%s*%s*.mat', params.prefix, RFSxLASER_info(subject_idx).ID));
@@ -1252,12 +1253,13 @@ fprintf('section 4: compute ICA\n')
 
 % update info structure
 load(output_file, 'RFSxLASER_info');
+cd(folder.processed)
 
 % load dataset if needed
 if exist('dataset') ~= 1
     fprintf('re-loading dataset... ')
     data2load = dir(sprintf('%s*%s*', params.prefix, RFSxLASER_info(subject_idx).ID));
-    dataset = reload_dataset(data2load, params.condition, 'processed');
+    dataset = reload_dataset(data2load, subject_idx, 'checked');
     fprintf('done.\n')
 end
 
@@ -1329,6 +1331,7 @@ RFSxLASER_info(subject_idx).preprocessing(14).params.freq = freq;
 fprintf('done.\n')
 
 % plot component topographies and spectral content
+addpath(genpath([folder.toolbox '\letswave 6']));
 figure('units','normalized','outerposition',[0 0 1 1]);
 hold on
 for f = 1:params.ICA_comp
@@ -1350,7 +1353,6 @@ saveas(gcf, sprintf('%s\\figures\\%s_ICA.png', folder.output, RFSxLASER_info(sub
 figure_counter = figure_counter + 1;
 
 % open letswave if not already open
-addpath(genpath([folder.toolbox '\letswave 6']));
 fig_all = findall(0, 'Type', 'figure');
 open = true;
 for f = 1:length(fig_all)
@@ -1382,6 +1384,7 @@ fprintf('section 5: encode ICA\n')
  
 % update info structure
 load(output_file, 'RFSxLASER_info');
+cd(folder.processed)
 
 % ask for subject number if necessary
 if ~exist('subject_idx')
@@ -1422,8 +1425,8 @@ switch answer
     case 'NO'
     case 'YES'
     	subject_idx = subject_idx + 1;
-end 
-clear answer
+        clear dataset answer
+end  
 
 %% ===================== PART 3: group visualization & export for statistics ================
 % directories
