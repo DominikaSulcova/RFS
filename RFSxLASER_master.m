@@ -1432,7 +1432,6 @@ end
 % directories
 if ~exist('folder') 
     folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % MATLAB toolboxes
-    folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
     folder.output = uigetdir(pwd, 'Choose the OneDrive folder');    % output folder --> figures, loutput file, exports 
 end
 folder.processed = uigetdir(pwd, 'Choose the data folder');         % processed data --> wherever you want to store the voluminous EEG data
@@ -1445,112 +1444,218 @@ if ~exist('figure_counter')
     figure_counter = 1;
 end
 
-% current subject 
-prompt = {'subject number:'};
-dlgtitle = 'subject';
-dims = [1 40];
-definput = {''};
-input = inputdlg(prompt,dlgtitle,dims,definput);
-subject_idx = str2num(input{1,1});
-clear prompt dlgtitle dims definput input
+% load the info structure
+if exist(output_file) == 2
+    output_vars = who('-file', output_file);
+    % info
+    if ismember('RFSxLASER_info', output_vars)
+        load(output_file, 'RFSxLASER_info')
+    else
+        error('ERROR: the output file does not contain the subject & session information!')
+    end
 
-%% ERP visualization
+    % data
+    if ismember('RFSxLASER_data', output_vars)
+        load(output_file, 'RFSxLASER_data')
+    else
+        RFSxLASER_data = struct;
+        save(output_file, 'RFSxLASER_data', '-append')
+    end
+else
+    error('ERROR: output file not found!')
+end
+clear output_vars
+
+%% 1) load data
 % ----- section input -----
-params.subjects = 1:9;
-params.prefix = 'dc ep reref ds notch bandpass dc';
+params.prefix = 'icfilt ica ar dc ep reref ds notch bandpass dc';
 params.side = {'right' 'left'};
 params.stimulus = {'laser' 'RFS'};
 params.intensity = {'high' 'low'};
-params.eoi = 'Cz';
-params.confidence = 'SD';
-params.xlim = [-0.2, 0.7];
-params.ylim = [-14, 14;
-    -9, 9];
-params.colours = [0.7882    0.0627    0.1961;
-    0.9412    0.4431    0.4431;
-    0.0510    0.3922    0.6196;
-    0.3020    0.7451    0.9333];
-params.alpha = 0.2;
+params.subjects = 22;
+params.baseline = [-0.3 -0.01];
 % -------------------------
+fprintf('section 1: load and prepare data\n')
 
-% update 
-load(output_file, 'RFSxLASER_info');
-cd(folder.processed)
+% add letswave 6 to the top of search path
+addpath(genpath([folder.toolbox '\letswave 6']));
 
-% load a header
-load(sprintf('%s %s %s %s %s.lw6', params.prefix, RFSxLASER_info(1).ID, ...
-    params.stimulus{1}, params.side{1}, params.intensity{1}), '-mat')
+% load data, normalize to baseline
+subject_idx = logical([]);
+for s = 1:params.subjects
+    fprintf('subject %d: ', s)
 
-% identify EOI
-eoi = find({header.chanlocs.labels}, params.eoi);
-
-% load and sort the data
-fprintf('loading subject ')
-for p = params.subjects
-    fprintf('%d ... ', p)
-    for d = 1:length(params.side)
-        for i = 1:length(params.intensity) 
-            for s = 1:length(params.stimulus)
-                % check if the dataset exists
-                files_available = dir(sprintf('%s*%s*%s*%s*%s*.mat', params.prefix, RFSxLASER_info(p).ID,...
-                    params.stimulus{s}, params.side{d}, params.intensity{i}));
-                if length(files_available) > 1
-                    error('ERROR: too many datasets found for descriptors ''%s'', ''%s'', and ''%s''\n', ...
-                        RFSxLASER_info(p).ID, params.stimulus{s}, params.intensity{i})
-                end
-                if isempty(files_available)
-                    continue
-                end
+    % check available data
+    data2load = dir(sprintf('%s\\%s*%s*', folder.processed, params.prefix, RFSxLASER_info(s).ID));
     
-                % load the data
-                load(files_available(1).name)
-    
-                % extract mean Cz signal
-                data_all(d, i, s, p, :) = squeeze(mean(data(:, eoi, 1, 1, 1, :), 1));     
+    % loop through datasets
+    if ~isempty(data2load)
+        fprintf('%d datasets found.\nloading... ', length(data2load))
+
+        % update index
+        subject_idx(s) = true;
+
+        % loop through datasets
+        for d = 1:length(data2load)
+            if contains(data2load(d).name, 'lw6')
+                % load the dataset
+                [header, data] = CLW_load(sprintf('%s\\%s', data2load(d).folder, data2load(d).name));
+
+                % normalize as z-score of the baseline 
+                [header, data, ~] = RLW_baseline(header, data, 'operation', 'zscore', 'xstart', params.baseline(1), 'xend', params.baseline(2));
+
+                % identify dataset
+                if contains(data2load(d).name, params.stimulus{1})
+                    thisdata.stimulus = params.stimulus{1};
+                elseif contains(data2load(d).name, params.stimulus{2})
+                    thisdata.stimulus = params.stimulus{2};
+                end
+                if contains(data2load(d).name, params.intensity{1})
+                    thisdata.intensity = params.intensity{1};
+                elseif contains(data2load(d).name, params.intensity{2})
+                    thisdata.intensity = params.intensity{2};
+                end
+                if contains(data2load(d).name, params.side{1})
+                    thisdata.side = params.side{1};
+                elseif contains(data2load(d).name, params.side{2})
+                    thisdata.side = params.side{2};
+                end
+
+                % save subject averages to the dataset structure
+                statement = sprintf('dataset.%s.%s.%s(s, :, :) =  squeeze(mean(data, 1));', thisdata.stimulus, thisdata.intensity, thisdata.side);
+                eval(statement)
+            end
+        end
+        fprintf('done.\n')
+    else
+        % update index
+        subject_idx(s) = false;
+        fprintf('WARNING: no data were found!\nskipping this dataset...\n')
+    end
+end
+dataset.subject_idx = subject_idx;
+RFSxLASER_data.original = dataset;
+
+% prepare flip dictionary
+params.labels = {header.chanlocs.labels};
+params.chanlocs = header.chanlocs;
+labels_flipped = params.labels;
+for i = 1:length(params.labels)
+    electrode_n = str2num(params.labels{i}(end));
+    if isempty(electrode_n)
+    else
+        if electrode_n == 0
+            label_new = params.labels{i}(1:end-2);
+            label_new = [label_new num2str(9)];
+        elseif mod(electrode_n,2) == 1              % odd number --> left hemisphere                    
+            label_new = params.labels{i}(1:end-1);
+            label_new = [label_new num2str(electrode_n + 1)];
+        else                                    % even number --> right hemisphere 
+            label_new = params.labels{i}(1:end-1);
+            label_new = [label_new num2str(electrode_n - 1)];
+        end
+        a = find(strcmpi(params.labels, label_new));
+        if isempty(a)
+        else
+            labels_flipped{i} = label_new;
+        end
+    end
+end
+labels_dict = cat(1, params.labels, labels_flipped)';
+
+% flip normalized data to homogenize side of stimulation --> if right, flip
+fprintf('flipping data: ')
+addpath(genpath([folder.toolbox '\letswave 6']));
+header.datasize(1) = 1;
+data = [];
+for s = 1:params.subjects 
+    if subject_idx(s)
+        fprintf('. ')
+        for a = 1:length(params.stimulus)
+            for b = 1:length(params.intensity)
+    	        % subset data from left-sided stimulation
+                statement = sprintf('data(1, :, 1, 1, 1, :) = squeeze(dataset.%s.%s.left(s, :, :));', params.stimulus{a}, params.intensity{b});
+                eval(statement)
+
+                % flip the data
+                [header, data, ~] = RLW_flip_electrodes(header, data, labels_dict);
+                
+                % append data
+                statement = sprintf('data_all(1, :, :) = squeeze(dataset.%s.%s.right(s, :, :));', params.stimulus{a}, params.intensity{b});
+                eval(statement)
+                data_all(2, :, :) = squeeze(data); 
+
+                % save to new dataset
+                statement = sprintf('dataset.flipped.%s.%s(s, :, :) = squeeze(mean(data_all, 1));', params.stimulus{a}, params.intensity{b});
+                eval(statement)
             end
         end
     end
 end
 fprintf('done.\n')
+dataset.flipped.subject_idx = subject_idx;
+RFSxLASER_data.flipped = dataset.flipped;
 
-% plot a figure for each stimulation intensity (contrast stimulus)
-for i = 1:length(params.intensity) 
-    % extract data for visualization, average across sides
-    data = squeeze(mean(data_all(:, i, :, :, :), 1));
-    visual = create_visual(data, header);
+% save and continue
+save(output_file, 'RFSxLASER_data', '-append')
+clear a b c d i s data2load data header thisdata dataset statement subject_idx labels_flipped electrode_n labels_dict data_all label_new
+fprintf('section 1 finished.\n\n')
 
-    % plot ERP
-    fig = figure(figure_counter);
-    set(gcf, "Position", [50, 30, 600, 480])
-    plot_ERP(visual, 'confidence', params.confidence, 'xlim', params.xlim, 'ylim', params.ylim(i, :), ...
-        'labels', params.stimulus, 'colours', params.colours((i-1)+[1,3], :), 'inverse', 'on')
-    title(sprintf('Subjects %d - %d: %s intensity stimulation', ...
-        params.subjects(1), params.subjects(end), params.intensity{i}))
+%% 2) ERP visualization
+% ----- section input -----
+params.eoi = 'Cz';
+% -------------------------
+fprintf('section 2: group average ERP visualization\n')
+
+% select dataset
+dataset = RFSxLASER_data.flipped;
+
+% define common visualization parameters
+load(sprintf('%s\\%s S001 laser right high.lw6', folder.processed, params.prefix), '-mat')
+params.x = (0:header.datasize(6)-1)*header.xstep + header.xstart;
+visual.x = params.x;
+visual.labels = params.stimulus;
+visual.chanlabels = params.labels;
+visual.t_value = tinv(0.975, sum(dataset.subject_idx) - 1); 
+visual.eoi = find(strcmp(visual.chanlabels, params.eoi));
+visual.colors = [0.3333    0.4471    0.9020;
+    1.0000    0.0745    0.6510];
+screen_size = get(0, 'ScreenSize');
+
+% plot ERPs for each intensity
+for b = 1:length(params.intensity)
+    % select laser data
+    statement = sprintf('data = squeeze(dataset.laser.%s(:, visual.eoi, :));', params.intensity{b});
+    eval(statement)
+    visual.data(1, :) = mean(data, 1);
+    visual.sem(1, :) = squeeze(std(data, 0, 1)) / sqrt(sum(dataset.subject_idx)); 
+    visual.CI_upper(1, :) = visual.data(1, :) + visual.t_value * visual.sem(1, :); 
+    visual.CI_lower(1, :) = visual.data(1, :) - visual.t_value * visual.sem(1, :);
+
+    % select RFS data
+    statement = sprintf('data = squeeze(dataset.RFS.%s(:, visual.eoi, :));', params.intensity{b});
+    eval(statement)
+    visual.data(2, :) = mean(data, 1);
+    visual.sem(2, :) = squeeze(std(data, 0, 1)) / sqrt(sum(dataset.subject_idx)); 
+    visual.CI_upper(2, :) = visual.data(2, :) + visual.t_value * visual.sem(2, :); 
+    visual.CI_lower(2, :) = visual.data(2, :) - visual.t_value * visual.sem(2, :);
+
+    % launch the figure
+    fig = figure(figure_counter);    
+    set(fig, 'Position', [screen_size(3)/4, screen_size(4)/4, 2*screen_size(3)/5, screen_size(4) / 2])
+
+    % plot
+    plot_ERP(visual, 'colours', visual.colors, 'labels', visual.labels, 'xlim', [-0.1 0.6], 'ylim', [-3 3], 'reverse', 'on')
+    title(sprintf('%s stimulation intensity', params.intensity{b}))
 
     % save figure and update counter
-    saveas(fig, sprintf('%s\\figures\\preliminary_S%d-%d_%s.png', folder.output, params.subjects(1), params.subjects(end), params.intensity{i}))
+    saveas(fig, sprintf('%s\\figures\\preliminary_%s_%s.png', folder.output, params.eoi, params.intensity{b}))
     figure_counter = figure_counter + 1;
 end
 
-%%plot a figure for each stimulus (contrast intensity)
-for s = 1:length(params.stimulus) 
-    % extract data for visualization, average across sides
-    data = squeeze(mean(data_all(:, :, s, :, :), 1));
-    visual = create_visual(data, header);
-
-    % plot ERP
-    fig = figure(figure_counter);
-    set(gcf, "Position", [50, 30, 600, 480])
-    plot_ERP(visual, 'confidence', params.confidence, 'xlim', params.xlim, 'ylim', params.ylim(1, :), ...
-        'labels', params.intensity, 'colours', params.colours((s-1)*2+[1,2], :), 'inverse', 'on')
-    title(sprintf('Subjects %d - %d: %s stimulation', ...
-        params.subjects(1), params.subjects(end), params.stimulus{s}))
-
-    % save figure and update counter
-    saveas(fig, sprintf('%s\\figures\\preliminary_S%d-%d_%s.png', folder.output, params.subjects(1), params.subjects(end), params.stimulus{s}))
-    figure_counter = figure_counter + 1;
-end
-clear params p s i d files_available data_all data header visual fig 
+% save and continue
+clear b dataset header data visual fig statement screen_size
+fprintf('section 2 finished.\n\n')
 
 %% functions
 function plot_thresholds(visual, threshold)   
@@ -1702,109 +1807,153 @@ for c = 1:size(data, 1)
     % visual.CI(c, :) = visual.t * visual.SEM(c, :); 
 end
 end
-function plot_ERP(visual, varargin) 
+function plot_ERP(input, varargin)
 % =========================================================================
-% plots ERP data
+% plots an event-related potential
+% input = structure with fields:    
+%           data --> condition/electrode * sample
+%           x --> vector with time samples
+%           CI_upper --> condition/electrode * sample
+%           CI_lower --> condition/electrode * sample
+% varargins = name-value pairs: 
+%           xlim --> 2-element vector (min, max)     
+%           ylim --> 2-element vector (min, max) 
+%           colours --> n*3 matrix of RGB values
+%           shading --> 'on'(default)/'off'
+%           alpha --> a float (default 0.2)           
+%           plot_legend --> 'on'(default)/'off'
+%           labels --> cell array with labels for the legend  
+%           legend_loc --> legend location (default 'southeast')
+%           eoi --> label of a channel to be highlighted
+%           reverse --> 'on'/'off'(default) - flips y axis
+%           interpolated --> time window that was interpolated
 % =========================================================================  
 % set defaults
+x_limits = [0,0];
+y_limits = [0,0];
+col = prism(size(input.data, 1));
 shading = true;
-conf = 'CI';
-x_limits = [visual.x(1), visual.x(end)];
-labels = [];
-for a = 1:size(visual.y, 1)
-    labels{a} = sprintf('dataset %d', a);
-end
-col = parula(size(visual.y, 1));
 alpha = 0.2;
-inverse = false;
-legend_loc = 'northeast';
+plot_legend = true;
+for c = 1:size(input.data, 1)
+    labels{c} = sprintf('condition %d', c);
+end
+legend_loc = 'southeast';
+highlight = false;
+reverse = false;
+interpolate = false;
 
 % check for varargins
 if ~isempty(varargin)
-    % shading 
-    i = find(strcmpi(varargin, 'shading'));
-    if ~isempty(i) && strcmp(varargin{i + 1}, 'off')
-        shading = false;
-    end
-
-    % confidence intervals
-    i = find(strcmpi(varargin, 'confidence'));
-    if ~isempty(i)
-        conf = varargin{i + 1};
-    end
-
-    % inverse y axis
-    i = find(strcmpi(varargin, 'inverse'));
-    if ~isempty(i) && strcmp(varargin{i + 1}, 'on')
-        inverse = true;
-    end
-
     % x limits
-    i = find(strcmpi(varargin, 'xlim'));
-    if ~isempty(i)
-        x_limits = varargin{i + 1};
+    a = find(strcmpi(varargin, 'xlim'));
+    if ~isempty(a)
+        x_limits = varargin{a + 1};
     end
 
     % y limits
-    i = find(strcmpi(varargin, 'ylim'));
-    if ~isempty(i)
-        y_limits = varargin{i + 1};
-    end
-
-    % labels
-    i = find(strcmpi(varargin, 'labels'));
-    if ~isempty(i)
-        labels = varargin{i + 1};       
+    b = find(strcmpi(varargin, 'ylim'));
+    if ~isempty(b)
+        y_limits = varargin{b + 1};
     end
 
     % colours
-    i = find(strcmpi(varargin, 'colours'));
-    if ~isempty(i)
-        col = varargin{i + 1};
+    c = find(strcmpi(varargin, 'colours'));
+    if ~isempty(c)
+        col = varargin{c + 1};
+    end
+
+    % shading - default on
+    d = find(strcmpi(varargin, 'shading'));
+    if ~isempty(d) && strcmp(varargin{d + 1}, 'off')
+        shading = false;
     end
 
     % alpha
-    i = find(strcmpi(varargin, 'alpha'));
-    if ~isempty(i)
-        alpha = varargin{i + 1};       
+    e = find(strcmpi(varargin, 'alpha'));
+    if ~isempty(e)
+        alpha = varargin{e + 1};
+    end
+
+    % legend - default on
+    f = find(strcmpi(varargin, 'legend'));
+    if ~isempty(f) && strcmp(varargin{f + 1}, 'off')
+        plot_legend = false;
+    end    
+
+    % labels
+    g = find(strcmpi(varargin, 'labels'));
+    if ~isempty(g)
+        labels = varargin{g + 1};
     end
 
     % legend location
-    i = find(strcmpi(varargin, 'legend_loc'));
-    if ~isempty(i) 
-        legend_loc = varargin{i + 1};        
-    end        
+    h = find(strcmpi(varargin, 'legend_loc'));
+    if ~isempty(h) 
+        legend_loc = varargin{h + 1};
+    end  
+
+    % highlighted channel - default off
+    i = find(strcmpi(varargin, 'eoi'));
+    if ~isempty(i)
+        eoi = varargin{i + 1};
+        eoi_n = find(contains(input.chanlabels, eoi));
+        highlight = true;
+    end 
+
+    % interpolated interval - default off
+    j = find(strcmpi(varargin, 'interpolated'));
+    if ~isempty(j)
+        interpolate_toi = varargin{j + 1};
+        interpolate = true;
+    end 
+
+    % reverse y axis - default off
+    r = find(strcmpi(varargin, 'reverse'));
+    if ~isempty(r) && strcmp(varargin{r + 1}, 'on')
+        reverse = true;
+    end
 end
 
-% shade confidence intervals
-if shading
-    % identify required value
-    statement = sprintf('ci = visual.%s;', conf);
-    eval(statement)
-
-    % plot
-    for a = 1:size(visual.y, 1) 
-        fill([visual.x fliplr(visual.x)], [visual.y(a, :) + ci(a, :) fliplr(visual.y(a, :) - ci(a, :))], ...
-            col(a, :), 'FaceAlpha', alpha, 'linestyle', 'none');
+% loop through datasets to plot
+for t = 1:size(input.data, 1) 
+    P(t) = plot(input.x, input.data(t, :), 'Color', col(t, :), 'LineWidth', 2);
+    hold on
+    if shading
+        F(t) = fill([input.x fliplr(input.x)],[input.CI_upper(t, :) fliplr(input.CI_lower(t, :))], ...
+            col(t, :), 'FaceAlpha', alpha, 'linestyle', 'none');
         hold on
     end
 end
 
-% plot mean values
-for a = 1:size(visual.y, 1) 
-    P(a) = plot(visual.x, visual.y(a, :), 'Color', col(a, :), 'LineWidth', 2.5);
+% check y limits
+if y_limits(1) == 0 && y_limits(2) == 0
+    y_limits = ylim;
+end
+
+% highlight channel if required
+if highlight
+    P(end + 1) = plot(input.x, input.data(eoi_n, :), 'Color', [0.9216    0.1490    0.1490], 'LineWidth', 4);
     hold on
 end
 
-% deal with limis
-xlim(x_limits)
-if ~exist('y_limits')
-    y_limits = ylim;
+% shade interpolated window if required
+if interpolate
+    interpolate_x = [interpolate_toi(1), interpolate_toi(2), interpolate_toi(2), interpolate_toi(1)];
+    interpolate_y = [y_limits(1), y_limits(1), y_limits(2), y_limits(2)];
+    fill(interpolate_x, interpolate_y, [0.5 0.5 0.5], 'FaceAlpha', 0.5, 'EdgeColor', 'none');
 end
-ylim(y_limits)
 
 % plot stimulus
 line([0, 0], y_limits, 'Color', 'black', 'LineWidth', 2.5, 'LineStyle', '--')
+
+% plot legend if required
+if plot_legend 
+    legend(P, labels, 'Location', legend_loc, 'fontsize', 14)
+    legend('boxoff');
+else
+    legend('off')
+end
 
 % axes
 box off;
@@ -1815,16 +1964,22 @@ ax.TickDir = 'out';
 ax.XColor = [0.5020    0.5020    0.5020]; 
 ax.YColor = [0.5020    0.5020    0.5020]; 
 
-% other parameters
-xlabel('time (ms)')
-ylabel(sprintf('amplitude (%sV %s %s)', char(956), char(177), conf))
-set(gca, 'FontSize', 14)
-set(gca, 'Layer', 'Top')
-if inverse
+% set x limits 
+if x_limits(1) == 0 && x_limits(2) == 0
+    xlim([input.x(1), input.x(end)]) 
+else
+    xlim(x_limits)
+end
+
+% referse y axis if required
+if reverse
     set(gca, 'YDir', 'reverse');
 end
 
-% legend
-legend(P, labels, 'Location', legend_loc, 'fontsize', 14)
-legend('boxoff');
+% other parameters
+xlabel('time (s)')
+ylabel('amplitude (\muV)')
+set(gca, 'FontSize', 14)
+ylim(y_limits)
+set(gca, 'Layer', 'Top')
 end
