@@ -1653,6 +1653,10 @@ for b = 1:length(params.intensity)
     figure_counter = figure_counter + 1;
 end
 
+% plot overall GFP for both stimuli - use flipped dataset
+% identify peak latencies
+% plot topographies at peak latencies
+
 % save and continue
 clear b dataset header data visual fig statement screen_size
 fprintf('section 2 finished.\n\n')
