@@ -316,7 +316,7 @@ RFSxLASER_info(subject_idx).stimulation.descriptors.values = params.values;
 
 % run for both stimuli and both hands
 for s = 1:length(params.stimulus)
-    for a = 1:length(params.stimulus)
+    for a = 1:length(params.side)
         % provide update
         fprintf('%s pain threshold - %s hand:\n', params.stimulus{s}, params.side{a})
 
@@ -1426,7 +1426,143 @@ switch answer
     case 'YES'
     	subject_idx = subject_idx + 1;
         clear dataset answer
-end  
+end
+
+%% 6) import and process PsychoPy data
+% ----- section input -----
+params.stimulus = {'laser', 'RFS'};
+params.side = {'right', 'left'};
+params.intensity = {'high' 'low'};
+params.folder = 'PsychoPy_blocks';
+% -------------------------
+fprintf('section 6: PsychoPy data import & processing\n')
+
+% update info structures
+output_vars = who('-file', output_file);
+if ismember('RFSxLASER_info', output_vars)
+    load(output_file, 'RFSxLASER_info')
+else
+    error('ERROR: the output file does not contain the subject & session information!')
+end
+if ismember('RFSxLASER_measures', output_vars)
+    load(output_file, 'RFSxLASER_measures')
+else
+    RFSxLASER_measures = struct;
+    save(output_file, 'RFSxLASER_measures', '-append')
+    fprintf('WARNING: the output file does not contain the measures output\n --> creating new strucutre now\n')
+end
+
+% ask for subject number, if not defined
+if ~exist('subject_idx')
+    prompt = {'subject number:'};
+    dlgtitle = 'subject';
+    dims = [1 40];
+    definput = {''};
+    input = inputdlg(prompt,dlgtitle,dims,definput);
+    subject_idx = str2num(input{1,1});
+end
+clear prompt dlgtitle dims definput input
+
+% load the .CSV
+fprintf('importing PsychoPy data...\n')
+file2import = dir(sprintf('%s\\%s\\%s\\*.csv', folder.raw, RFSxLASER_info(subject_idx).ID, params.folder));
+if size(file2import, 1) ~= 1
+    error('ERROR: %d files were found instead of expected 1!\n', size(file2import, 1))
+end
+option = detectImportOptions(sprintf('%s\\%s', file2import.folder, file2import.name));
+option.SelectedVariableNames = {'block' 'condition', 'stim1_trials_thisRepN', 'stim2_trials_thisRepN', 'slider_response', 'slider_rt'};
+ratings_table = readtable(sprintf('%s\\%s', file2import.folder, file2import.name), option);
+
+% formate and append to the output structure
+idx = logical([]);
+for a = 1:height(ratings_table)
+    if isnan(ratings_table.block(a))
+        idx(a) = false;
+    else
+        idx(a) = true;
+        if isnan(ratings_table.stim1_trials_thisRepN(a))
+            ratings_table.trial(a) = ratings_table.stim2_trials_thisRepN(a) + 1;
+        elseif isnan(ratings_table.stim2_trials_thisRepN(a))
+            ratings_table.trial(a) = ratings_table.stim1_trials_thisRepN(a) + 1;
+        end
+    end
+end
+ratings_table = ratings_table(idx, [1,2,7,5,6]);
+RFSxLASER_measures(subject_idx).ratings.ID = RFSxLASER_info(subject_idx).ID;
+RFSxLASER_measures(subject_idx).ratings.raw = ratings_table;
+
+% calculate basic statistics and append to the output structure
+RFSxLASER_measures(subject_idx).ratings.subjects_stats = struct([]);
+for a = 1:length(params.stimulus)
+    for b = 1:length(params.side)
+        for c = 1:length(params.intensity)
+            % identify condition label
+            if strcmp(params.stimulus{a}, 'laser')
+                label = 'LS_';
+            elseif strcmp(params.stimulus{a}, 'RFS')
+                label = 'RF_';
+            end
+            if strcmp(params.side{b}, 'right')
+                label = [label 'RH_'];
+            elseif strcmp(params.side{b}, 'left')
+                label = [label 'LH_'];
+            end
+            if strcmp(params.intensity{c}, 'high')
+                label = [label 'high'];
+            elseif strcmp(params.intensity{c}, 'low')
+                label = [label 'low'];
+            end
+
+            % subset the data
+            idx = logical([]);
+            for d = 1:height(ratings_table)
+                if strcmp(ratings_table.condition(d), label)
+                    idx(d) = true;
+                else
+                    idx(d) = false;
+                end
+            end
+            data = [ratings_table.slider_response(idx)];
+
+            if ~isempty(data)
+                % remove missed or faulty trials
+                for d = 1:length(RFSxLASER_info(subject_idx).preprocessing(13).params.discarded)  
+                    if contains(RFSxLASER_info(subject_idx).preprocessing(13).params.discarded(d).dataset, params.stimulus{a}) && ...
+                            contains(RFSxLASER_info(subject_idx).preprocessing(13).params.discarded(d).dataset, params.side{b}) && ...
+                            contains(RFSxLASER_info(subject_idx).preprocessing(13).params.discarded(d).dataset, params.intensity{c}) 
+                        bad_trials = RFSxLASER_info(subject_idx).preprocessing(13).params.discarded(d).trials;
+                    end
+                end
+                data(bad_trials) = [];
+
+                % encode conditions
+                RFSxLASER_measures(subject_idx).ratings.stats(end + 1).stimulus = params.stimulus{a};
+                RFSxLASER_measures(subject_idx).ratings.stats(end).side = params.side{b};
+                RFSxLASER_measures(subject_idx).ratings.stats(end).intensity = params.intensity{c};
+
+                % calculate and append stats
+                t_value = tinv(0.975, length(data) - 1); 
+                RFSxLASER_measures(subject_idx).ratings.stats(end).mean = mean(data, 1);
+                RFSxLASER_measures(subject_idx).ratings.stats(end).SD = std(data, 0, 1);
+                RFSxLASER_measures(subject_idx).ratings.stats(end).SEM = RFSxLASER_measures(subject_idx).ratings.stats(end).SD / sqrt(length(data)); 
+                RFSxLASER_measures(subject_idx).ratings.stats(end).CI_upper = RFSxLASER_measures(subject_idx).ratings.stats(end).mean + t_value * RFSxLASER_measures(subject_idx).ratings.stats(end).SEM; 
+                RFSxLASER_measures(subject_idx).ratings.stats(end).CI_lower = RFSxLASER_measures(subject_idx).ratings.stats(end).mean - t_value * RFSxLASER_measures(subject_idx).ratings.stats(end).SEM; 
+            end
+        end
+    end
+end
+save(output_file, 'RFSxLASER_measures', '-append')
+
+% clear and ask if the subject is done
+fprintf('\nsection 6 finished.\n\n')
+answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
+switch answer
+    case 'NO'
+    case 'YES'
+    	subject_idx = subject_idx + 1;
+        clear  
+end
+clear a b c d output_vars file2import option ratings_table idx label data bad_trials t_value answer
 
 %% ===================== PART 3: group visualization & export for statistics ================
 % directories
@@ -1460,6 +1596,14 @@ if exist(output_file) == 2
     else
         RFSxLASER_data = struct;
         save(output_file, 'RFSxLASER_data', '-append')
+    end
+
+    % measures
+    if ismember('RFSxLASER_measures', output_vars)
+        load(output_file, 'RFSxLASER_measures')
+    else
+        RFSxLASER_measures = struct;
+        save(output_file, 'RFSxLASER_measures', '-append')
     end
 else
     error('ERROR: output file not found!')
