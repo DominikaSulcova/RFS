@@ -1470,7 +1470,7 @@ if size(file2import, 1) ~= 1
     error('ERROR: %d files were found instead of expected 1!\n', size(file2import, 1))
 end
 option = detectImportOptions(sprintf('%s\\%s', file2import.folder, file2import.name));
-option.SelectedVariableNames = {'block' 'condition', 'stim1_trials_thisRepN', 'stim2_trials_thisRepN', 'slider_response', 'slider_rt'};
+option.SelectedVariableNames = {'block' 'condition', 'stim1_trials_thisRepN', 'slider_response', 'slider_rt'};
 ratings_table = readtable(sprintf('%s\\%s', file2import.folder, file2import.name), option);
 
 % formate and append to the output structure
@@ -1480,11 +1480,7 @@ for a = 1:height(ratings_table)
         idx(a) = false;
     else
         idx(a) = true;
-        if isnan(ratings_table.stim1_trials_thisRepN(a))
-            ratings_table.trial(a) = ratings_table.stim2_trials_thisRepN(a) + 1;
-        elseif isnan(ratings_table.stim2_trials_thisRepN(a))
-            ratings_table.trial(a) = ratings_table.stim1_trials_thisRepN(a) + 1;
-        end
+        ratings_table.trial(a) = ratings_table.stim1_trials_thisRepN(a) + 1;
     end
 end
 ratings_table = ratings_table(idx, [1,2,7,5,6]);
@@ -1492,7 +1488,7 @@ RFSxLASER_measures(subject_idx).ratings.ID = RFSxLASER_info(subject_idx).ID;
 RFSxLASER_measures(subject_idx).ratings.raw = ratings_table;
 
 % calculate basic statistics and append to the output structure
-RFSxLASER_measures(subject_idx).ratings.subjects_stats = struct([]);
+RFSxLASER_measures(subject_idx).ratings.stats = struct([]);
 for a = 1:length(params.stimulus)
     for b = 1:length(params.side)
         for c = 1:length(params.intensity)
