@@ -1419,15 +1419,6 @@ save(output_file, 'RFSxLASER_info', '-append')
 fprintf('\nsection 5 finished.\n\n')
 clear params data2load prompt dlgtitle dims definput input 
 
-% ask if the subject is done
-answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
-switch answer
-    case 'NO'
-    case 'YES'
-    	subject_idx = subject_idx + 1;
-        clear dataset answer
-end
-
 %% 6) import and process PsychoPy data
 % ----- section input -----
 params.stimulus = {'laser', 'RFS'};
@@ -1549,16 +1540,267 @@ for a = 1:length(params.stimulus)
 end
 save(output_file, 'RFSxLASER_measures', '-append')
 
-% clear and ask if the subject is done
+% clear and continue
 fprintf('\nsection 6 finished.\n\n')
+clear a b c d output_vars file2import option ratings_table idx label data bad_trials t_value 
+
+%% 7) extraction of the N1 component from ERPs
+% ----- section input -----
+params.prefix = 'icfilt ica ar dc ep reref ds notch bandpass dc';
+params.ref = 'AFz';
+params.suffix = {'N1_reref' 'N1_ica' 'icfilt' 'N1_ready'};
+params.stimulus = {'laser', 'RFS'};
+% -------------------------
+fprintf('section 7: N1 component extraction\n')
+
+% update info structures
+output_vars = who('-file', output_file);
+if ismember('RFSxLASER_info', output_vars)
+    load(output_file, 'RFSxLASER_info')
+else
+    error('ERROR: the output file does not contain the subject & session information!')
+end
+if ismember('RFSxLASER_measures', output_vars)
+    load(output_file, 'RFSxLASER_measures')
+else
+    RFSxLASER_measures = struct;
+    save(output_file, 'RFSxLASER_measures', '-append')
+    fprintf('WARNING: the output file does not contain the measures output\n --> creating new strucutre now\n')
+end
+
+% add letswave 7 to the top of search path
+addpath(genpath([folder.toolbox '\letswave 7']));
+cd(folder.processed)
+
+% load the data
+fprintf('loading... ')
+data2load = dir(sprintf('%s\\%s*%s*', folder.raw, params.prefix, RFSxLASER_info(subject_idx).ID));
+dataset = reload_dataset(data2load, 1, 'icfilt');
+fprintf('%d datasets found and loaded.\n', length(dataset.icfilt))
+
+% re-reference to chosen frontal central electrode
+fprintf('re-referencing to %s...\n', params.ref)
+for d = 1:length(dataset.icfilt)
+    % subset the dataset
+    lwdata = dataset.icfilt(d);
+
+    % re-reference
+    option = struct('reference_list', {{params.ref}}, 'apply_list', {{lwdata.header.chanlocs.labels}},...
+    'suffix', params.suffix{1}, 'is_save', 0);
+    lwdata = FLW_rereference.get_lwdata(lwdata, option);  
+
+    % update dataset
+    dataset.N1(d) = lwdata;
+
+    % encode to info structure
+    if d == 1
+        RFSxLASER_info(subject_idx).preprocessing(16).process = 're-referenced for N1 extraction';
+        RFSxLASER_info(subject_idx).preprocessing(16).params.reference = params.ref;
+        RFSxLASER_info(subject_idx).preprocessing(16).suffix = params.suffix{1};
+        RFSxLASER_info(subject_idx).preprocessing(16).date = sprintf('%s', date);
+    end
+end 
+
+% prepare flip dictionary
+params.labels = {dataset.icfilt(1).header.chanlocs.labels};
+params.chanlocs = dataset.icfilt(1).header.chanlocs;
+labels_flipped = params.labels;
+for i = 1:length(params.labels)
+    electrode_n = str2num(params.labels{i}(end));
+    if isempty(electrode_n)
+    else
+        if electrode_n == 0
+            label_new = params.labels{i}(1:end-2);
+            label_new = [label_new num2str(9)];
+        elseif mod(electrode_n,2) == 1              % odd number --> left hemisphere                    
+            label_new = params.labels{i}(1:end-1);
+            label_new = [label_new num2str(electrode_n + 1)];
+        else                                    % even number --> right hemisphere 
+            label_new = params.labels{i}(1:end-1);
+            label_new = [label_new num2str(electrode_n - 1)];
+        end
+        a = find(strcmpi(params.labels, label_new));
+        if isempty(a)
+        else
+            labels_flipped{i} = label_new;
+        end
+    end
+end
+labels_dict = cat(1, params.labels, labels_flipped)';
+
+% compute ICA separately for RFS and laser
+IC_n = RFSxLASER_info(subject_idx).preprocessing(15).params.kept - 1;
+for s = 1:length(params.stimulus)
+    % update
+    fprintf('%s stimulation:\n', params.stimulus{s})
+
+    % select datasets for this stimulus
+    data_idx = logical([]);
+    for d = 1:length(dataset.icfilt)
+        if contains(dataset.icfilt(d).header.name, params.stimulus{s})
+            data_idx(d) = true;
+        else
+            data_idx(d) = false;
+        end
+    end
+    lwdataset = dataset.N1(data_idx);
+
+    % flip datasets that were stimulated on the left hand 
+    addpath(genpath([folder.toolbox '\letswave 6']));
+    for d = 1:length(lwdataset)
+        % flip if leftsided
+        if contains(dataset.icfilt(d).header.name, 'left')
+            [lwdataset(d).header, lwdataset(d).data, ~] = RLW_flip_electrodes(lwdataset(d).header, lwdataset(d).data, labels_dict);
+        end
+    end
+
+    % calculate ICA matrix
+    addpath(genpath([folder.toolbox '\letswave 7']));
+    fprintf('computing ICA matrix:\n')
+    option = struct('ICA_mode', 2, 'algorithm', 1, 'num_ICs', IC_n, 'suffix', params.suffix{2}, 'is_save', 1);
+    lwdataset = FLW_compute_ICA_merged.get_lwdataset(lwdataset, option);
+    fprintf('done.\n')
+
+    % extract ICA parameters
+    matrix.mix = lwdataset(1).header.history(end).option.mix_matrix;
+    matrix.unmix = lwdataset(1).header.history(end).option.unmix_matrix;    
+    for i = 1:size(matrix.mix, 2)
+        params.ICA_labels{i} = ['IC',num2str(i)];
+    end
+    params.ICA_SR = 1/lwdataset(1).header.xstep;
+
+    % adjust for letswave 6 and update dataset  
+    for a = 1:length(lwdataset)
+        lwdataset(a).header.history(end).configuration.gui_info.function_name = 'LW_ICA_compute_merged';  
+        lwdataset(a).header.history(end).configuration.parameters = lwdataset(a).header.history(end).option;  
+        [lwdataset(a).header.history(end).configuration.parameters.ICA_um] = lwdataset(a).header.history(end).configuration.parameters.unmix_matrix; 
+        [lwdataset(a).header.history(end).configuration.parameters.ICA_mm] = lwdataset(a).header.history(end).configuration.parameters.mix_matrix; 
+        lwdataset(a).header.history(end).configuration.parameters = rmfield(lwdataset(a).header.history(end).configuration.parameters, {'unmix_matrix' 'mix_matrix'});
+        header = lwdataset(a).header;
+        save(sprintf('%s.lw6', lwdataset(a).header.name), 'header');
+    end
+    dataset.N1(data_idx) = lwdataset;
+
+    % unmix data
+    for a = 1:length(lwdataset)
+        lwdataset_unmixed(a).header = lwdataset(a).header;
+        for e = 1:size(lwdataset(a).data, 1)
+            lwdataset_unmixed(a).data(e, :, 1, 1, 1, :) = matrix.unmix * squeeze(lwdataset(a).data(e, :, 1, 1, 1, :));        
+        end
+    end
+    dataset.N1_unmixed(data_idx) = lwdataset_unmixed;
+
+    % encode to info structure
+    if s == 1
+        RFSxLASER_info(subject_idx).preprocessing(17).process = 'ICA-based removal of N2P2 component';
+        RFSxLASER_info(subject_idx).preprocessing(17).params.method = 'runica';
+        RFSxLASER_info(subject_idx).preprocessing(17).params.components = IC_n;
+        RFSxLASER_info(subject_idx).preprocessing(17).params.chanlocs = params.chanlocs;
+        RFSxLASER_info(subject_idx).preprocessing(17).params.labels = params.ICA_labels;
+        RFSxLASER_info(subject_idx).preprocessing(17).params.SR = params.ICA_SR;
+        RFSxLASER_info(subject_idx).preprocessing(17).params.matrix.laser = matrix;
+        RFSxLASER_info(subject_idx).preprocessing(17).suffix = params.suffix{2};
+        RFSxLASER_info(subject_idx).preprocessing(17).date = sprintf('%s', date);
+    elseif s == 2
+        RFSxLASER_info(subject_idx).preprocessing(17).params.matrix.RFS = matrix;
+    end
+
+    % plot component topographies and mean signal at Cz
+    addpath(genpath([folder.toolbox '\letswave 6']));
+    figure('units','normalized','outerposition',[0 0 1 1]);
+    hold on
+    for i = 1:IC_n
+        % plot the topography
+        subplot(ceil(IC_n/3), 6, (i-1)*2 + 1);
+        topoplot(double(matrix.mix(:, i)'), params.chanlocs, 'maplimits', [-4 4], 'shading', 'interp', 'whitebk', 'on', 'electrodes', 'off')
+        set(gca,'color',[1 1 1]);
+        title(params.ICA_labels{i})
+
+        % calculate mean timecourse and x
+        for a = 1:length(lwdataset_unmixed)
+            visual.data(a, :) = squeeze(mean(lwdataset_unmixed(a).data(:, i, 1, 1, 1, :), 1))'; 
+        end
+        visual.data = mean(visual.data, 1);
+        visual.x = (0:lwdataset(a).header.datasize(6)-1)*lwdataset(a).header.xstep + lwdataset(a).header.xstart;
+    
+        % plot the psd
+        subplot(ceil(IC_n/3), 6, (i-1)*2 + 2);
+        plot_ERP(visual, 'xlim', [-0.1 0.8], 'colours', [0 0 0], 'legend', 'off', 'shading', 'off')
+    end
+    sgtitle(sprintf('%s - %s: N1 ICA components', RFSxLASER_info(subject_idx).ID, params.stimulus{s}))
+    saveas(gcf, sprintf('%s\\figures\\%s_%s_N1-ICA.png', folder.output, RFSxLASER_info(subject_idx).ID, params.stimulus{s}))
+    figure_counter = figure_counter + 1;
+end
+
+% open letswave if not already open
+fig_all = findall(0, 'Type', 'figure');
+open = true;
+for f = 1:length(fig_all)
+    if contains(get(fig_all(f), 'Name'), 'Letswave', 'IgnoreCase', true)
+        open = false;
+        break;
+    end
+end
+if open
+    fprintf('opening letswave:\n')
+    addpath(genpath([folder.toolbox '\letswave 6']));
+    letswave
+end
+
+% identify outcome filenames and wait for them to appear
+for d = 1:length(data2load)
+    filenames{d} = sprintf('%s %s',[params.suffix{3} ' ' params.suffix{2} ' ' params.suffix{1}], data2load(d).name);
+end
+wait4files(filenames);
+close(gcf)
+
+% load filtered data, flip back the datasets and save for letswave
+fprintf('saving the final dataset... ')
+for d = 1:length(dataset.icfilt)
+    % load filtered data
+    data_name = sprintf('%s %s',[params.suffix{3} ' ' params.suffix{2} ' ' params.suffix{1}], dataset.icfilt(d).header.name);
+    load(sprintf('%s.lw6', data_name), '-mat');
+    dataset.N1_filtered(d).header = header; 
+    load(sprintf('%s.mat', data_name));
+    dataset.N1_filtered(d).data = data; 
+
+    % flip back if leftsided
+    if contains(dataset.icfilt(d).header.name, 'left')
+        [dataset.N1_filtered(d).header, dataset.N1_filtered(d).data, ~] = RLW_flip_electrodes(dataset.N1_filtered(d).header, dataset.N1_filtered(d).data, labels_dict);
+    end
+
+    % save with final suffix
+    dataset.N1_filtered(d).header.name =sprintf('%s %s',params.suffix{4}, dataset.icfilt(d).header.name);
+    header = dataset.N1_filtered(d).header;
+    save(sprintf('%s.lw6', dataset.N1_filtered(d).header.name), 'header')
+    data = dataset.N1_filtered(d).data;
+    save(sprintf('%s.mat', dataset.N1_filtered(d).header.name), 'data')
+end
+fprintf('done.\n')
+
+% encode ICA 
+prompt = {'ICs removed for laser:' 'ICs removed for RFS:'};
+dlgtitle = 'N1 ICA';
+dims = [1 40];
+definput = {'' ''};
+input = inputdlg(prompt,dlgtitle,dims,definput);
+RFSxLASER_info(subject_idx).preprocessing(17).params.N2P2_component.laser = split(input{1}, ',');
+RFSxLASER_info(subject_idx).preprocessing(17).params.N2P2_component.RFS = split(input{2}, ',');
+save(output_file, 'RFSxLASER_info', '-append')
+
+% clear and continue
+fprintf('\nsection 7 finished.\n\n')
+clear a d e f i s output_vars data2load dataset lwdata option labels_flipped electrode_n label_new labels_dict data_idx lwdataset ...
+        IC_n matrix lwdataset_unmixed fig_all open filenames data_name data header prompt dlgtitle dims definput input visual
+ 
+% ask if the subject is done
 answer = questdlg(sprintf('Do you want to continue to subject %d?', subject_idx + 1), 'Continue to next subject?', 'YES', 'NO', 'NO'); 
 switch answer
     case 'NO'
     case 'YES'
     	subject_idx = subject_idx + 1;
-        clear  
+        clear dataset answer
 end
-clear a b c d output_vars file2import option ratings_table idx label data bad_trials t_value answer
 
 %% ===================== PART 3: group visualization & export for statistics ================
 % directories
@@ -1894,7 +2136,7 @@ if length(datas) == length(headers)
         eval(statement) 
     end
 else
-    error('ERROR: Wrong number of available datasets to load! Check manually.')
+    error('ERROR: Number of data files (.mat) does not match the number of header files (.lw6)! Check manually.')
 end
 end
 function wait4files(filenames)
@@ -1965,7 +2207,7 @@ function plot_ERP(input, varargin)
 %           colours --> n*3 matrix of RGB values
 %           shading --> 'on'(default)/'off'
 %           alpha --> a float (default 0.2)           
-%           plot_legend --> 'on'(default)/'off'
+%           legend --> 'on'(default)/'off'
 %           labels --> cell array with labels for the legend  
 %           legend_loc --> legend location (default 'southeast')
 %           eoi --> label of a channel to be highlighted
