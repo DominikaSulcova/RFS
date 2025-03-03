@@ -39,7 +39,7 @@
 % The third part of the script provides group average visualization and
 % exports the data in appropriate formates for the stat analysis in R.
 
-%% % ===================== PART 1: experimental session ====================
+%% ===================== PART 1: experimental session =====================
 % directories
 folder.toolbox = uigetdir(pwd, 'Choose the toolbox folder');    % MATLAB toolboxes
 folder.raw = uigetdir(pwd, 'Coose the input folder');           % raw data --> at MSH, this should be the study folder at the V drive
