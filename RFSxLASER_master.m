@@ -1474,12 +1474,11 @@ for a = 1:height(ratings_table)
         ratings_table.trial(a) = ratings_table.stim1_trials_thisRepN(a) + 1;
     end
 end
-ratings_table = ratings_table(idx, [1,2,7,5,6]);
-RFSxLASER_measures(subject_idx).ratings.ID = RFSxLASER_info(subject_idx).ID;
-RFSxLASER_measures(subject_idx).ratings.raw = ratings_table;
+ratings_table = ratings_table(idx, [1,2,6,4,5]);
+RFSxLASER_measures.individual(subject_idx).ratings.raw = ratings_table;
 
 % calculate basic statistics and append to the output structure
-RFSxLASER_measures(subject_idx).ratings.stats = struct([]);
+RFSxLASER_measures.individual(subject_idx).ratings.stats = struct([]);
 for a = 1:length(params.stimulus)
     for b = 1:length(params.side)
         for c = 1:length(params.intensity)
@@ -1523,17 +1522,17 @@ for a = 1:length(params.stimulus)
                 data(bad_trials) = [];
 
                 % encode conditions
-                RFSxLASER_measures(subject_idx).ratings.stats(end + 1).stimulus = params.stimulus{a};
-                RFSxLASER_measures(subject_idx).ratings.stats(end).side = params.side{b};
-                RFSxLASER_measures(subject_idx).ratings.stats(end).intensity = params.intensity{c};
+                RFSxLASER_measures.individual(subject_idx).ratings.stats(end + 1).stimulus = params.stimulus{a};
+                RFSxLASER_measures.individual(subject_idx).ratings.stats(end).side = params.side{b};
+                RFSxLASER_measures.individual(subject_idx).ratings.stats(end).intensity = params.intensity{c};
 
                 % calculate and append stats
-                t_value = tinv(0.975, length(data) - 1); 
-                RFSxLASER_measures(subject_idx).ratings.stats(end).mean = mean(data, 1);
-                RFSxLASER_measures(subject_idx).ratings.stats(end).SD = std(data, 0, 1);
-                RFSxLASER_measures(subject_idx).ratings.stats(end).SEM = RFSxLASER_measures(subject_idx).ratings.stats(end).SD / sqrt(length(data)); 
-                RFSxLASER_measures(subject_idx).ratings.stats(end).CI_upper = RFSxLASER_measures(subject_idx).ratings.stats(end).mean + t_value * RFSxLASER_measures(subject_idx).ratings.stats(end).SEM; 
-                RFSxLASER_measures(subject_idx).ratings.stats(end).CI_lower = RFSxLASER_measures(subject_idx).ratings.stats(end).mean - t_value * RFSxLASER_measures(subject_idx).ratings.stats(end).SEM; 
+                % t_value = tinv(0.975, length(data) - 1); 
+                RFSxLASER_measures.individual(subject_idx).ratings.stats(end).mean = mean(data, 1);
+                RFSxLASER_measures.individual(subject_idx).ratings.stats(end).SD = std(data, 0, 1);
+                RFSxLASER_measures.individual(subject_idx).ratings.stats(end).SEM = RFSxLASER_measures.individual(subject_idx).ratings.stats(end).SD / sqrt(length(data)); 
+                % RFSxLASER_measures(subject_idx).ratings.stats(end).CI_upper = RFSxLASER_measures(subject_idx).ratings.stats(end).mean + t_value * RFSxLASER_measures(subject_idx).ratings.stats(end).SEM; 
+                % RFSxLASER_measures(subject_idx).ratings.stats(end).CI_lower = RFSxLASER_measures(subject_idx).ratings.stats(end).mean - t_value * RFSxLASER_measures(subject_idx).ratings.stats(end).SEM; 
             end
         end
     end
@@ -1567,6 +1566,17 @@ else
     save(output_file, 'RFSxLASER_measures', '-append')
     fprintf('WARNING: the output file does not contain the measures output\n --> creating new strucutre now\n')
 end
+
+% ask for subject number, if not defined
+if ~exist('subject_idx')
+    prompt = {'subject number:'};
+    dlgtitle = 'subject';
+    dims = [1 40];
+    definput = {''};
+    input = inputdlg(prompt,dlgtitle,dims,definput);
+    subject_idx = str2num(input{1,1});
+end
+clear prompt dlgtitle dims definput input
 
 % add letswave 7 to the top of search path
 addpath(genpath([folder.toolbox '\letswave 7']));
@@ -1851,10 +1861,11 @@ clear output_vars
 %% 1) load data
 % ----- section input -----
 params.prefix = 'icfilt ica ar dc ep reref ds notch bandpass dc';
+params.prefix_N1 = 'N1_ready';
 params.side = {'right' 'left'};
 params.stimulus = {'laser' 'RFS'};
 params.intensity = {'high' 'low'};
-params.subjects = 22;
+params.subjects = 25;
 params.baseline = [-0.3 -0.01];
 % -------------------------
 fprintf('section 1: load and prepare data\n')
@@ -1863,7 +1874,9 @@ fprintf('section 1: load and prepare data\n')
 addpath(genpath([folder.toolbox '\letswave 6']));
 
 % load data, normalize to baseline
+% create subject-average original dataset
 subject_idx = logical([]);
+dataset = [];
 for s = 1:params.subjects
     fprintf('subject %d: ', s)
 
@@ -1915,7 +1928,6 @@ for s = 1:params.subjects
         fprintf('WARNING: no data were found!\nskipping this dataset...\n')
     end
 end
-dataset.subject_idx = subject_idx;
 RFSxLASER_data.original = dataset;
 
 % prepare flip dictionary
@@ -1946,37 +1958,159 @@ end
 labels_dict = cat(1, params.labels, labels_flipped)';
 
 % flip normalized data to homogenize side of stimulation --> if right, flip
+% create subject-average flipped dataset
+% + check for missing datasets
 fprintf('flipping data: ')
 addpath(genpath([folder.toolbox '\letswave 6']));
 header.datasize(1) = 1;
-data = [];
+subject_idx = logical([]);
+data_all = [];
 for s = 1:params.subjects 
-    if subject_idx(s)
-        fprintf('. ')
-        for a = 1:length(params.stimulus)
-            for b = 1:length(params.intensity)
-    	        % subset data from left-sided stimulation
+    fprintf('. ')
+    for a = 1:length(params.stimulus)
+        for b = 1:length(params.intensity)
+            % check if data exist
+            for c = 1:length(params.side)
+                statement = sprintf('data = squeeze(dataset.%s.%s.%s(%d, :, :));', params.stimulus{a}, params.intensity{b}, params.side{c}, s);
+                eval(statement)
+                if sum(data, 'all') == 0
+                    subject_idx(a, b, c, s) = false;
+                else
+                    subject_idx(a, b, c, s) = true;
+                end
+            end
+            data = [];
+
+            % load data from right-sided stimulation
+            statement = sprintf('data_all(1, :, :) = squeeze(dataset.%s.%s.right(s, :, :));', params.stimulus{a}, params.intensity{b});
+            eval(statement)
+            
+            % flip data from left-sided stimulation
+            if subject_idx(a, b, 2, s)
+                % load data
                 statement = sprintf('data(1, :, 1, 1, 1, :) = squeeze(dataset.%s.%s.left(s, :, :));', params.stimulus{a}, params.intensity{b});
                 eval(statement)
-
-                % flip the data
+    
+                % flip the data and append
                 [header, data, ~] = RLW_flip_electrodes(header, data, labels_dict);
-                
-                % append data
-                statement = sprintf('data_all(1, :, :) = squeeze(dataset.%s.%s.right(s, :, :));', params.stimulus{a}, params.intensity{b});
-                eval(statement)
-                data_all(2, :, :) = squeeze(data); 
-
-                % save to new dataset
-                statement = sprintf('dataset.flipped.%s.%s(s, :, :) = squeeze(mean(data_all, 1));', params.stimulus{a}, params.intensity{b});
-                eval(statement)
+                data_all(2, :, :) = squeeze(data);     
             end
+
+            % save to new dataset
+            statement = sprintf('dataset.flipped.%s.%s(s, :, :) = squeeze(mean(data_all, 1));', params.stimulus{a}, params.intensity{b});
+            eval(statement)
         end
     end
 end
 fprintf('done.\n')
-dataset.flipped.subject_idx = subject_idx;
+RFSxLASER_data.original.subject_idx = subject_idx;
 RFSxLASER_data.flipped = dataset.flipped;
+
+% load N1-preprocessed data, normalize to baseline
+% create subject-average original_N1 dataset
+subject_idx = logical([]);
+dataset = [];
+for s = 19:params.subjects
+    fprintf('subject %d: ', s)
+
+    % check available data
+    data2load = dir(sprintf('%s\\%s*%s*', folder.processed, params.prefix_N1, RFSxLASER_info(s).ID));
+    
+    % loop through datasets
+    if ~isempty(data2load)
+        fprintf('%d datasets found.\nloading... ', length(data2load))
+
+        % update index
+        subject_idx(s) = true;
+
+        % loop through datasets
+        for d = 1:length(data2load)
+            if contains(data2load(d).name, 'lw6')
+                % load the dataset
+                [header, data] = CLW_load(sprintf('%s\\%s', data2load(d).folder, data2load(d).name));
+
+                % normalize as z-score of the baseline 
+                [header, data, ~] = RLW_baseline(header, data, 'operation', 'zscore', 'xstart', params.baseline(1), 'xend', params.baseline(2));
+
+                % identify dataset
+                if contains(data2load(d).name, params.stimulus{1})
+                    thisdata.stimulus = params.stimulus{1};
+                elseif contains(data2load(d).name, params.stimulus{2})
+                    thisdata.stimulus = params.stimulus{2};
+                end
+                if contains(data2load(d).name, params.intensity{1})
+                    thisdata.intensity = params.intensity{1};
+                elseif contains(data2load(d).name, params.intensity{2})
+                    thisdata.intensity = params.intensity{2};
+                end
+                if contains(data2load(d).name, params.side{1})
+                    thisdata.side = params.side{1};
+                elseif contains(data2load(d).name, params.side{2})
+                    thisdata.side = params.side{2};
+                end
+
+                % save subject averages to the dataset structure
+                statement = sprintf('dataset.%s.%s.%s(s, :, :) =  squeeze(mean(data, 1));', thisdata.stimulus, thisdata.intensity, thisdata.side);
+                eval(statement)
+            end
+        end
+        fprintf('done.\n')
+    else
+        % update index
+        subject_idx(s) = false;
+        fprintf('WARNING: no data were found!\nskipping this dataset...\n')
+    end
+end
+RFSxLASER_data.original_N1 = dataset;
+
+% flip normalized data to homogenize side of stimulation --> if right, flip
+% create subject-average flipped dataset
+% + check for missing datasets
+fprintf('flipping data: ')
+addpath(genpath([folder.toolbox '\letswave 6']));
+header.datasize(1) = 1;
+subject_idx = logical([]);
+data_all = [];
+for s = 1:params.subjects 
+    fprintf('. ')
+    for a = 1:length(params.stimulus)
+        for b = 1:length(params.intensity)
+            % check if data exist
+            for c = 1:length(params.side)
+                statement = sprintf('data = squeeze(dataset.%s.%s.%s(%d, :, :));', params.stimulus{a}, params.intensity{b}, params.side{c}, s);
+                eval(statement)
+                if sum(data, 'all') == 0
+                    subject_idx(a, b, c, s) = false;
+                else
+                    subject_idx(a, b, c, s) = true;
+                end
+            end
+            data = [];
+
+            % load data from right-sided stimulation
+            statement = sprintf('data_all(1, :, :) = squeeze(dataset.%s.%s.right(s, :, :));', params.stimulus{a}, params.intensity{b});
+            eval(statement)
+            
+            % flip data from left-sided stimulation
+            if subject_idx(a, b, 2, s)
+                % load data
+                statement = sprintf('data(1, :, 1, 1, 1, :) = squeeze(dataset.%s.%s.left(s, :, :));', params.stimulus{a}, params.intensity{b});
+                eval(statement)
+    
+                % flip the data and append
+                [header, data, ~] = RLW_flip_electrodes(header, data, labels_dict);
+                data_all(2, :, :) = squeeze(data);     
+            end
+
+            % save to new dataset
+            statement = sprintf('dataset.flipped.%s.%s(s, :, :) = squeeze(mean(data_all, 1));', params.stimulus{a}, params.intensity{b});
+            eval(statement)
+        end
+    end
+end
+fprintf('done.\n')
+RFSxLASER_data.original_N1.subject_idx = subject_idx;
+RFSxLASER_data.flipped_N1 = dataset.flipped;
 
 % save and continue
 save(output_file, 'RFSxLASER_data', '-append')
