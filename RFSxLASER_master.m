@@ -1865,7 +1865,7 @@ params.prefix_N1 = 'N1_ready';
 params.side = {'right' 'left'};
 params.stimulus = {'laser' 'RFS'};
 params.intensity = {'high' 'low'};
-params.baseline = [-0.3 -0.01];
+params.baseline = [-0.3 0];
 % -------------------------
 fprintf('section 1: load and prepare data\n')
 
@@ -1897,7 +1897,7 @@ for s = 1:params.subjects
                 [header, data] = CLW_load(sprintf('%s\\%s', data2load(d).folder, data2load(d).name));
 
                 % normalize as z-score of the baseline 
-                [header, data, ~] = RLW_baseline(header, data, 'operation', 'zscore', 'xstart', params.baseline(1), 'xend', params.baseline(2));
+                [header, data, ~] = RLW_baseline(header, data, 'operation', 'subtract', 'xstart', params.baseline(1), 'xend', params.baseline(2));
 
                 % identify dataset
                 if contains(data2load(d).name, params.stimulus{1})
