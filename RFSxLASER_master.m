@@ -1862,6 +1862,7 @@ clear output_vars
 % ----- section input -----
 params.prefix = 'icfilt ica ar dc ep reref ds notch bandpass dc';
 params.prefix_N1 = 'N1_ready';
+params.suffix = {'bl'};
 params.side = {'right' 'left'};
 params.stimulus = {'laser' 'RFS'};
 params.intensity = {'high' 'low'};
@@ -1873,7 +1874,6 @@ fprintf('section 1: load and prepare data\n')
 addpath(genpath([folder.toolbox '\letswave 6']));
 
 % load data, normalize to baseline
-% create subject-average original dataset
 params.subjects = length(RFSxLASER_info);
 subject_idx = logical([]);
 dataset = [];
@@ -1896,8 +1896,15 @@ for s = 1:params.subjects
                 % load the dataset
                 [header, data] = CLW_load(sprintf('%s\\%s', data2load(d).folder, data2load(d).name));
 
-                % normalize as z-score of the baseline 
+                % correct for baseline (subtraction)
                 [header, data, ~] = RLW_baseline(header, data, 'operation', 'subtract', 'xstart', params.baseline(1), 'xend', params.baseline(2));
+                if d == 1 
+                    RFSxLASER_info(s).preprocessing(18).process = 'normalized to baseline';
+                    RFSxLASER_info(s).preprocessing(18).params.method = 'mean subtraction';
+                    RFSxLASER_info(s).preprocessing(18).params.baseline = params.baseline;
+                    RFSxLASER_info(s).preprocessing(18).suffix = params.suffix{1};
+                    RFSxLASER_info(s).preprocessing(18).date = sprintf('%s', date);
+                end
 
                 % identify dataset
                 if contains(data2load(d).name, params.stimulus{1})
@@ -1958,7 +1965,6 @@ end
 labels_dict = cat(1, params.labels, labels_flipped)';
 
 % flip normalized data to homogenize side of stimulation --> if right, flip
-% create subject-average flipped dataset
 % + check for missing datasets
 fprintf('flipping data: ')
 addpath(genpath([folder.toolbox '\letswave 6']));
@@ -2007,10 +2013,9 @@ RFSxLASER_data.original.subject_idx = subject_idx;
 RFSxLASER_data.flipped = dataset.flipped;
 
 % load N1-preprocessed data, normalize to baseline
-% create subject-average original_N1 dataset
 subject_idx = logical([]);
 dataset = [];
-for s = 19:params.subjects
+for s = 1:params.subjects
     fprintf('subject %d: ', s)
 
     % check available data
@@ -2029,8 +2034,8 @@ for s = 19:params.subjects
                 % load the dataset
                 [header, data] = CLW_load(sprintf('%s\\%s', data2load(d).folder, data2load(d).name));
 
-                % normalize as z-score of the baseline 
-                [header, data, ~] = RLW_baseline(header, data, 'operation', 'zscore', 'xstart', params.baseline(1), 'xend', params.baseline(2));
+                % correct for baseline (subtraction)
+                [header, data, ~] = RLW_baseline(header, data, 'operation', 'subtract', 'xstart', params.baseline(1), 'xend', params.baseline(2));
 
                 % identify dataset
                 if contains(data2load(d).name, params.stimulus{1})
@@ -2064,7 +2069,6 @@ end
 RFSxLASER_data.original_N1 = dataset;
 
 % flip normalized data to homogenize side of stimulation --> if right, flip
-% create subject-average flipped dataset
 % + check for missing datasets
 fprintf('flipping data: ')
 addpath(genpath([folder.toolbox '\letswave 6']));
@@ -2117,7 +2121,7 @@ save(output_file, 'RFSxLASER_data', '-append')
 clear a b c d i s data2load data header thisdata dataset statement subject_idx labels_flipped electrode_n labels_dict data_all label_new
 fprintf('section 1 finished.\n\n')
 
-%% 2) N2P2 ERP visualization and peak measure extraction
+%% 2) N2P2 ERP visualization and peak measure extraction 
 % ----- section input -----
 params.eoi = 'Cz';
 params.prefix = 'N1_ready';
@@ -2125,17 +2129,14 @@ params.stimulus = {'laser' 'RFS'};
 params.intensity = {'high' 'low'};
 params.ERP_measures = {'N2_latency' 'N2_amplitude' 'P2_latency' 'P2_amplitude'};
 params.search_window = [0.05 0.75];
-params.outliers = [16];
+params.subjects2remove = [3, 16];
 % -------------------------
-fprintf('section 2: group statistics - ERP\n')
-
-% select dataset
-dataset = RFSxLASER_data.flipped;
+fprintf('section 2A: group statistics - ERP (sides merged)\n')
 
 % define subject filter
 params.subjects = length(RFSxLASER_info);
 subject_filter = logical(ones(1, params.subjects)); 
-subject_filter(params.outliers) = false;
+subject_filter(params.subjects2remove) = false;
 
 % define common visualization & stats parameters
 data2load = dir(sprintf('%s\\%s*%s*', folder.processed, params.prefix));
@@ -2152,17 +2153,19 @@ screen_size = get(0, 'ScreenSize');
 
 % plot N2P2 ERPs for each intensity
 for b = 1:length(params.intensity)
+    % select flipped dataset
+    dataset = RFSxLASER_data.flipped;
+    visual.data = [];
+
     % select laser data
-    statement = sprintf('data = squeeze(dataset.laser.%s(subject_filter, visual.eoi, :));', params.intensity{b});
-    eval(statement)
+    data = squeeze(dataset.laser.(params.intensity{b})(subject_filter, visual.eoi, :));
     visual.data(1, :) = mean(data, 1);
     visual.sem(1, :) = squeeze(std(data, 0, 1)) / sqrt(sum(subject_filter)); 
     visual.CI_upper(1, :) = visual.data(1, :) + t_value * visual.sem(1, :); 
     visual.CI_lower(1, :) = visual.data(1, :) - t_value * visual.sem(1, :);
 
     % select RFS data
-    statement = sprintf('data = squeeze(dataset.RFS.%s(subject_filter, visual.eoi, :));', params.intensity{b});
-    eval(statement)
+    data = squeeze(dataset.RFS.(params.intensity{b})(subject_filter, visual.eoi, :));
     visual.data(2, :) = mean(data, 1);
     visual.sem(2, :) = squeeze(std(data, 0, 1)) / sqrt(sum(subject_filter)); 
     visual.CI_upper(2, :) = visual.data(2, :) + t_value * visual.sem(2, :); 
@@ -2172,27 +2175,54 @@ for b = 1:length(params.intensity)
     fig = figure(figure_counter);    
     set(fig, 'Position', [screen_size(3)/4, screen_size(4)/4, 2*screen_size(3)/5, screen_size(4) / 2])
 
-    % plot
-    plot_ERP(visual, 'colours', visual.colors, 'labels', visual.labels, 'xlim', [-0.1 0.6], 'ylim', [-3.5 3.5], 'reverse', 'on')
+    % plot merged data
+    plot_ERP(visual, 'colours', visual.colors, 'labels', visual.labels, 'xlim', [-0.1 0.6], 'ylim', [-8 13], 'reverse', 'on')
     title(sprintf('%s stimulation intensity', params.intensity{b}))
+    hold on
+
+    % add side-specific data
+    dataset = RFSxLASER_data.original;
+    for c = 1:length(params.side)
+        % select laser data
+        data = squeeze(dataset.laser.(params.intensity{b}).(params.side{c})(subject_filter, visual.eoi, :));
+        visual.data((c-1)*2 + 1, :) = mean(data, 1);
+            
+        % select RFS data
+        data = squeeze(dataset.RFS.(params.intensity{b}).(params.side{c})(subject_filter, visual.eoi, :));
+        visual.data((c-1)*2 + 2, :) = mean(data, 1);
+
+        % add colours
+        if c == 1
+            visual.sidecolors((c-1)*2 + [1,2], :) = [0, 0, 0; 0, 0, 0];
+        elseif c == 2
+            visual.sidecolors((c-1)*2 + [1,2], :) = [0.6510    0.6510    0.6510; 0.6510    0.6510    0.6510];
+        end
+    end
+
+    % plot side-specific data
+    plot_ERP(visual, 'colours', visual.sidecolors, 'legend', 'off', 'shading', 'off', 'xlim', [-0.1 0.6], 'ylim', [-8 13], 'reverse', 'on')
 
     % save figure and update counter
-    saveas(fig, sprintf('%s\\figures\\preliminary_%s_%s.png', folder.output, params.eoi, params.intensity{b}))
+    saveas(fig, sprintf('%s\\figures\\final\\N2P2_%s_%s.png', folder.output, params.eoi, params.intensity{b}))
+    saveas(fig, sprintf('%s\\figures\\final\\N2P2_%s_%s.svg', folder.output, params.eoi, params.intensity{b}))
     figure_counter = figure_counter + 1;
 end
 
-% plot topographies at group average peak latencies
+% plot topographies at group average peak latencies, save average values
 search_window = find(visual.x >= params.search_window(1) & visual.x <= params.search_window(2));
 addpath(genpath([folder.toolbox '\letswave 6']));
 for a = 1:length(params.stimulus)
     for b = 1:length(params.intensity)
         % subset dataset
-        statement = sprintf('data = squeeze(mean(dataset.%s.%s(subject_filter, :, :), 1));', params.stimulus{a}, params.intensity{b});
-        eval(statement)
+        data = squeeze(mean(dataset.(params.stimulus{a}).(params.intensity{b})(subject_filter, :, :), 1));
 
         % indentify N2 idx
         [N2_amplitude, idx] = min(data(visual.eoi, search_window));
         N2_idx = search_window(1) + idx;
+
+        % save values
+        avg_visual.(params.stimulus{a}).(params.intensity{b}).N2_amplitude = N2_amplitude;
+        avg_visual.(params.stimulus{a}).(params.intensity{b}).N2_latency = visual.x(N2_idx);
 
         % prepare data for visualization
         visual.data = data(:, N2_idx)';
@@ -2202,12 +2232,16 @@ for a = 1:length(params.stimulus)
         topoplot(double(visual.data), visual.chanlocs, 'maplimits', [-2 2], 'shading', 'interp', 'whitebk', 'on', 'electrodes', 'off')
         set(gca,'color',[1 1 1]);
         title(sprintf('%s, %s intensity - N2', params.stimulus{a}, params.intensity{b}))
-        saveas(gcf, sprintf('%s\\figures\\preliminary_topo_%s_%s_N2.png', folder.output, params.stimulus{a}, params.intensity{b}))
+        saveas(gcf, sprintf('%s\\figures\\final\\N2_merged_topo_%s_%s.png', folder.output, params.stimulus{a}, params.intensity{b}))
         figure_counter = figure_counter + 1;
 
         % indentify P2 idx
         [P2_amplitude, idx] = max(data(visual.eoi, search_window));
         P2_idx = search_window(1) + idx;
+
+        % save values
+        avg_visual.(params.stimulus{a}).(params.intensity{b}).P2_amplitude = P2_amplitude;
+        avg_visual.(params.stimulus{a}).(params.intensity{b}).P2_latency = visual.x(P2_idx);
 
         % prepare data for visualization
         visual.data = data(:, P2_idx)';
@@ -2217,7 +2251,7 @@ for a = 1:length(params.stimulus)
         topoplot(double(visual.data), visual.chanlocs, 'maplimits', [-2 2], 'shading', 'interp', 'whitebk', 'on', 'electrodes', 'off')
         set(gca,'color',[1 1 1]);
         title(sprintf('%s, %s intensity - P2', params.stimulus{a}, params.intensity{b}))
-        saveas(gcf, sprintf('%s\\figures\\preliminary_topo_%s_%s_P2.png', folder.output, params.stimulus{a}, params.intensity{b}))
+        saveas(gcf, sprintf('%s\\figures\\final\\P2_merged_topo_%s_%s.png', folder.output, params.stimulus{a}, params.intensity{b}))
         figure_counter = figure_counter + 1;
     end
 end
@@ -2240,13 +2274,13 @@ for a = 1:length(params.stimulus)
             P2_latency = params.search_window(1) + idx*header.xstep;
 
             % encode to the output structure
-            statement = sprintf('RFSxLASER_measures.individual(s).ERP.%s.%s.N2_latency = N2_latency;', params.stimulus{a}, params.intensity{b});
+            statement = sprintf('RFSxLASER_measures.merged.individual(s).ERP.%s.%s.N2_latency = N2_latency;', params.stimulus{a}, params.intensity{b});
             eval(statement)
-            statement = sprintf('RFSxLASER_measures.individual(s).ERP.%s.%s.N2_amplitude = N2_amplitude;', params.stimulus{a}, params.intensity{b});
+            statement = sprintf('RFSxLASER_measures.merged.individual(s).ERP.%s.%s.N2_amplitude = N2_amplitude;', params.stimulus{a}, params.intensity{b});
             eval(statement)
-            statement = sprintf('RFSxLASER_measures.individual(s).ERP.%s.%s.P2_latency = P2_latency;', params.stimulus{a}, params.intensity{b});
+            statement = sprintf('RFSxLASER_measures.merged.individual(s).ERP.%s.%s.P2_latency = P2_latency;', params.stimulus{a}, params.intensity{b});
             eval(statement)
-            statement = sprintf('RFSxLASER_measures.individual(s).ERP.%s.%s.P2_amplitude = P2_amplitude;', params.stimulus{a}, params.intensity{b});
+            statement = sprintf('RFSxLASER_measures.merged.individual(s).ERP.%s.%s.P2_amplitude = P2_amplitude;', params.stimulus{a}, params.intensity{b});
             eval(statement)
         end
     end
@@ -2260,22 +2294,22 @@ for a = 1:length(params.stimulus)
             % extract the data
             data = [];
             for s = 1:params.subjects
-                statement = sprintf('data(s) = [RFSxLASER_measures.individual(s).ERP.%s.%s.%s];', params.stimulus{a}, params.intensity{b}, params.ERP_measures{c});
+                statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.%s.%s.%s];', params.stimulus{a}, params.intensity{b}, params.ERP_measures{c});
                 eval(statement)                
             end
             data = data(subject_filter);
 
             % calculate the stats
-            RFSxLASER_measures.group_stats.ERP(row_counter).stimulus = params.stimulus{a}; 
-            RFSxLASER_measures.group_stats.ERP(row_counter).intensity = params.intensity{b};
-            RFSxLASER_measures.group_stats.ERP(row_counter).measure = params.ERP_measures{c};
-            RFSxLASER_measures.group_stats.ERP(row_counter).mean = mean(data);
-            RFSxLASER_measures.group_stats.ERP(row_counter).min = min(data);
-            RFSxLASER_measures.group_stats.ERP(row_counter).max = max(data);
-            RFSxLASER_measures.group_stats.ERP(row_counter).SD = std(data);
-            RFSxLASER_measures.group_stats.ERP(row_counter).SEM = std(data) / sqrt(sum(subject_filter)); 
-            RFSxLASER_measures.group_stats.ERP(row_counter).CI_upper = mean(data) + t_value * RFSxLASER_measures.group_stats.ERP(row_counter).SEM; 
-            RFSxLASER_measures.group_stats.ERP(row_counter).CI_lower = mean(data) - t_value * RFSxLASER_measures.group_stats.ERP(row_counter).SEM;
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).stimulus = params.stimulus{a}; 
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).intensity = params.intensity{b};
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).measure = params.ERP_measures{c};
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).mean = mean(data);
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).min = min(data);
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).max = max(data);
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).SD = std(data);
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).SEM = std(data) / sqrt(sum(subject_filter)); 
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).CI_upper = mean(data) + t_value * RFSxLASER_measures.group_stats.ERP(row_counter).SEM; 
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).CI_lower = mean(data) - t_value * RFSxLASER_measures.group_stats.ERP(row_counter).SEM;
 
             % update row counter
             row_counter = row_counter + 1;
@@ -2289,9 +2323,9 @@ for b = 1:length(params.intensity)
         % extract the data
         data = [];
         for s = 1:params.subjects
-            statement = sprintf('data(s) = [RFSxLASER_measures.individual(s).ERP.laser.%s.%s];', params.intensity{b}, params.ERP_measures{c});
+            statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.laser.%s.%s];', params.intensity{b}, params.ERP_measures{c});
             eval(statement)
-            statement = sprintf('data(params.subjects + s) = [RFSxLASER_measures.individual(s).ERP.RFS.%s.%s];', params.intensity{b}, params.ERP_measures{c});
+            statement = sprintf('data(params.subjects + s) = [RFSxLASER_measures.merged.individual(s).ERP.RFS.%s.%s];', params.intensity{b}, params.ERP_measures{c});
             eval(statement)
         end
         visual.data = data([subject_filter, subject_filter])';
@@ -2321,7 +2355,7 @@ for c = 1:length(params.ERP_measures)
     % extract laser data
     data = [];
     for s = 1:params.subjects
-        statement = sprintf('data(s) = [RFSxLASER_measures.individual(s).ERP.laser.high.%s];', params.ERP_measures{c});
+        statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.laser.high.%s];', params.ERP_measures{c});
         eval(statement)                
     end
     data_all(1, :) = data(subject_filter);
@@ -2329,7 +2363,7 @@ for c = 1:length(params.ERP_measures)
     % extract laser data
     data = [];
     for s = 1:params.subjects
-        statement = sprintf('data(s) = [RFSxLASER_measures.individual(s).ERP.RFS.high.%s];', params.ERP_measures{c});
+        statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.RFS.high.%s];', params.ERP_measures{c});
         eval(statement)                
     end
     data_all(2, :) = data(subject_filter);
@@ -2349,20 +2383,269 @@ RFSxLASER_measures.group_stats.ERP(1).ttest = ttest;
 save(output_file, 'RFSxLASER_measures', '-append')
 clear a b c s dataset data2load header data visual t_value fig statement screen_size search_window ttest subject_filter ...
     idx N2_amplitude N2_latency P2_amplitude P2_latency row_counter N2_idx P2_idx group fig data_all output
-fprintf('section 2 finished.\n\n')
+fprintf('section 2A finished.\n\n')
+
+%% 2B) N2P2 ERP visualization and peak measure extraction - per each side
+% ----- section input -----
+params.eoi = 'Cz';
+params.prefix = 'N1_ready';
+params.stimulus = {'laser' 'RFS'};
+params.intensity = {'high' 'low'};
+params.ERP_measures = {'N2_latency' 'N2_amplitude' 'P2_latency' 'P2_amplitude'};
+params.search_window = [0.05 0.75];
+params.subjects2remove = [3, 16];
+% -------------------------
+fprintf('section 2B: group statistics - ERP (per side)\n')
+
+% select dataset
+dataset = RFSxLASER_data.original;
+
+% define subject filter
+params.subjects = length(RFSxLASER_info);
+subject_filter = logical(ones(1, params.subjects)); 
+subject_filter(params.subjects2remove) = false;
+
+% define common visualization & stats parameters
+data2load = dir(sprintf('%s\\%s*%s*', folder.processed, params.prefix));
+load(sprintf('%s\\%s', data2load(1).folder, data2load(1).name), '-mat')
+t_value = tinv(0.975, sum(subject_filter) - 1); 
+visual.x = (0:header.datasize(6)-1)*header.xstep + header.xstart;
+visual.labels = params.side;
+visual.chanlocs = header.chanlocs;
+visual.chanlabels = {header.chanlocs.labels};
+visual.eoi = find(strcmp(visual.chanlabels, params.eoi));
+screen_size = get(0, 'ScreenSize');
+
+%% plot N2P2 ERPs for each stimulus and intensity 
+for a = 1:length(params.stimulus)
+    % choose the colour
+    if strcmp(params.stimulus{a}, 'laser')
+        visual.colors = [0.3333    0.4471    0.9020;
+            0.2471    0.6902    0.8000];
+    elseif strcmp(params.stimulus{a}, 'RFS')
+        visual.colors = [1.0000    0.0745    0.6510;
+            0.9412    0.5647    0.7137];
+    end
+
+    for b = 1:length(params.intensity)
+        % select laser data
+        data = squeeze(dataset.(params.stimulus{a}).(params.intensity{b}).right(subject_filter, visual.eoi, :));
+        visual.data(1, :) = mean(data, 1);
+        visual.sem(1, :) = squeeze(std(data, 0, 1)) / sqrt(sum(subject_filter)); 
+        visual.CI_upper(1, :) = visual.data(1, :) + t_value * visual.sem(1, :); 
+        visual.CI_lower(1, :) = visual.data(1, :) - t_value * visual.sem(1, :);
+    
+        % select RFS data
+        data = squeeze(dataset.(params.stimulus{a}).(params.intensity{b}).left(subject_filter, visual.eoi, :));
+        visual.data(2, :) = mean(data, 1);
+        visual.sem(2, :) = squeeze(std(data, 0, 1)) / sqrt(sum(subject_filter)); 
+        visual.CI_upper(2, :) = visual.data(2, :) + t_value * visual.sem(2, :); 
+        visual.CI_lower(2, :) = visual.data(2, :) - t_value * visual.sem(2, :);
+    
+        % launch the figure
+        fig = figure(figure_counter);    
+        set(fig, 'Position', [screen_size(3)/4, screen_size(4)/4, 2*screen_size(3)/5, screen_size(4) / 2])
+    
+        % plot
+        plot_ERP(visual, 'colours', visual.colors, 'labels', visual.labels, 'xlim', [-0.1 0.6], 'ylim', [-8 13], 'reverse', 'on')
+        title(sprintf('%s, %s stimulation intensity', params.stimulus{a}, params.intensity{b}))
+    
+        % save figure and update counter
+        saveas(fig, sprintf('%s\\figures\\final\\N2P2_%s_%s_%s.png', folder.output, params.eoi, params.stimulus{a}, params.intensity{b}))
+        saveas(fig, sprintf('%s\\figures\\final\\N2P2_%s_%s_%s.svg', folder.output, params.eoi, params.stimulus{a}, params.intensity{b}))
+        figure_counter = figure_counter + 1;
+    end
+end
+
+%% plot topographies at group average peak latencies, save average values
+search_window = find(visual.x >= params.search_window(1) & visual.x <= params.search_window(2));
+addpath(genpath([folder.toolbox '\letswave 6']));
+for a = 1:length(params.stimulus)
+    for b = 1:length(params.intensity)
+        % subset dataset
+        data = squeeze(mean(dataset.(params.stimulus{a}).(params.intensity{b})(subject_filter, :, :), 1));
+
+        % indentify N2 idx
+        [N2_amplitude, idx] = min(data(visual.eoi, search_window));
+        N2_idx = search_window(1) + idx;
+
+        % save values
+        avg_visual.(params.stimulus{a}).(params.intensity{b}).N2_amplitude = N2_amplitude;
+        avg_visual.(params.stimulus{a}).(params.intensity{b}).N2_latency = visual.x(N2_idx);
+
+        % prepare data for visualization
+        visual.data = data(:, N2_idx)';
+
+        % plot & save N2 topography
+        figure(figure_counter);
+        topoplot(double(visual.data), visual.chanlocs, 'maplimits', [-2 2], 'shading', 'interp', 'whitebk', 'on', 'electrodes', 'off')
+        set(gca,'color',[1 1 1]);
+        title(sprintf('%s, %s intensity - N2', params.stimulus{a}, params.intensity{b}))
+        saveas(gcf, sprintf('%s\\figures\\final\\N2_merged_topo_%s_%s.png', folder.output, params.stimulus{a}, params.intensity{b}))
+        figure_counter = figure_counter + 1;
+
+        % indentify P2 idx
+        [P2_amplitude, idx] = max(data(visual.eoi, search_window));
+        P2_idx = search_window(1) + idx;
+
+        % save values
+        avg_visual.(params.stimulus{a}).(params.intensity{b}).P2_amplitude = P2_amplitude;
+        avg_visual.(params.stimulus{a}).(params.intensity{b}).P2_latency = visual.x(P2_idx);
+
+        % prepare data for visualization
+        visual.data = data(:, P2_idx)';
+
+        % plot & save P2 topography
+        figure(figure_counter);
+        topoplot(double(visual.data), visual.chanlocs, 'maplimits', [-2 2], 'shading', 'interp', 'whitebk', 'on', 'electrodes', 'off')
+        set(gca,'color',[1 1 1]);
+        title(sprintf('%s, %s intensity - P2', params.stimulus{a}, params.intensity{b}))
+        saveas(gcf, sprintf('%s\\figures\\final\\P2_merged_topo_%s_%s.png', folder.output, params.stimulus{a}, params.intensity{b}))
+        figure_counter = figure_counter + 1;
+    end
+end
+
+% extract N2P2 peak amplitudes and latencies
+for a = 1:length(params.stimulus)
+    for b = 1:length(params.intensity)
+        % extract single-subject measures
+        for s = 1:params.subjects
+            % select data
+            statement = sprintf('data = squeeze(dataset.%s.%s(%d, visual.eoi, :))'';', params.stimulus{a}, params.intensity{b}, s);
+            eval(statement)
+
+            % extract N2 measures
+            [N2_amplitude, idx] = min(data(search_window));
+            N2_latency = params.search_window(1) + idx*header.xstep;
+
+            % extract P2 measures
+            [P2_amplitude, idx] = max(data(search_window));
+            P2_latency = params.search_window(1) + idx*header.xstep;
+
+            % encode to the output structure
+            statement = sprintf('RFSxLASER_measures.merged.individual(s).ERP.%s.%s.N2_latency = N2_latency;', params.stimulus{a}, params.intensity{b});
+            eval(statement)
+            statement = sprintf('RFSxLASER_measures.merged.individual(s).ERP.%s.%s.N2_amplitude = N2_amplitude;', params.stimulus{a}, params.intensity{b});
+            eval(statement)
+            statement = sprintf('RFSxLASER_measures.merged.individual(s).ERP.%s.%s.P2_latency = P2_latency;', params.stimulus{a}, params.intensity{b});
+            eval(statement)
+            statement = sprintf('RFSxLASER_measures.merged.individual(s).ERP.%s.%s.P2_amplitude = P2_amplitude;', params.stimulus{a}, params.intensity{b});
+            eval(statement)
+        end
+    end
+end
+
+% calculate group statistics
+row_counter = 1;
+for a = 1:length(params.stimulus)
+    for b = 1:length(params.intensity)
+        for c = 1:length(params.ERP_measures)
+            % extract the data
+            data = [];
+            for s = 1:params.subjects
+                statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.%s.%s.%s];', params.stimulus{a}, params.intensity{b}, params.ERP_measures{c});
+                eval(statement)                
+            end
+            data = data(subject_filter);
+
+            % calculate the stats
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).stimulus = params.stimulus{a}; 
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).intensity = params.intensity{b};
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).measure = params.ERP_measures{c};
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).mean = mean(data);
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).min = min(data);
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).max = max(data);
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).SD = std(data);
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).SEM = std(data) / sqrt(sum(subject_filter)); 
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).CI_upper = mean(data) + t_value * RFSxLASER_measures.group_stats.ERP(row_counter).SEM; 
+            RFSxLASER_measures.merged.group_stats.ERP(row_counter).CI_lower = mean(data) - t_value * RFSxLASER_measures.group_stats.ERP(row_counter).SEM;
+
+            % update row counter
+            row_counter = row_counter + 1;
+        end
+    end
+end
+
+% plot boxplots for group statistics
+for b = 1:length(params.intensity)
+    for c = 1:length(params.ERP_measures)
+        % extract the data
+        data = [];
+        for s = 1:params.subjects
+            statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.laser.%s.%s];', params.intensity{b}, params.ERP_measures{c});
+            eval(statement)
+            statement = sprintf('data(params.subjects + s) = [RFSxLASER_measures.merged.individual(s).ERP.RFS.%s.%s];', params.intensity{b}, params.ERP_measures{c});
+            eval(statement)
+        end
+        visual.data = data([subject_filter, subject_filter])';
+
+        % plot the boxplot
+        visual.group = [ones(sum(subject_filter), 1); 2*ones(sum(subject_filter), 1)];
+        figure(figure_counter)
+        if contains(params.ERP_measures{c}, 'latency')    
+            if contains(params.ERP_measures{c}, 'N2')  
+                plot_box(visual, 'orientation', 'horizontal', 'xlim', [0.1 0.25], 'xlabel', 'time (s)')
+            elseif contains(params.ERP_measures{c}, 'P2')
+                plot_box(visual, 'orientation', 'horizontal', 'xlim', [0.18 0.48], 'xlabel', 'time (s)')
+            end
+        elseif contains(params.ERP_measures{c}, 'amplitude')
+            plot_box(visual, 'ylabel', 'amplitude (\muV)')
+        end
+        title(sprintf('%s stimulation intensity - %s',  params.intensity{b}, strrep(params.ERP_measures{c}, '_', ' ')))
+
+        % save and update counter
+        saveas(gcf, sprintf('%s\\figures\\preliminary_box_%s_%s.png', folder.output, params.intensity{b}, params.ERP_measures{c}))
+        figure_counter = figure_counter + 1;
+    end
+end
+
+% paired t-test for high intensity stimulaiton
+for c = 1:length(params.ERP_measures)
+    % extract laser data
+    data = [];
+    for s = 1:params.subjects
+        statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.laser.high.%s];', params.ERP_measures{c});
+        eval(statement)                
+    end
+    data_all(1, :) = data(subject_filter);
+
+    % extract laser data
+    data = [];
+    for s = 1:params.subjects
+        statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.RFS.high.%s];', params.ERP_measures{c});
+        eval(statement)                
+    end
+    data_all(2, :) = data(subject_filter);
+
+    % run the paired t-test
+    fprintf('%s:\n', strrep(params.ERP_measures{c}, '_', ' '))
+    output = paired_t(data_all);
+
+    % append the output
+    statement = sprintf('ttest.%s = output;', params.ERP_measures{c});
+    eval(statement)
+    fprintf('\n')
+end
+RFSxLASER_measures.group_stats.ERP(1).ttest = ttest;
+
+% save and continue
+save(output_file, 'RFSxLASER_measures', '-append')
+clear a b c s dataset data2load header data visual t_value fig statement screen_size search_window ttest subject_filter ...
+    idx N2_amplitude N2_latency P2_amplitude P2_latency row_counter N2_idx P2_idx group fig data_all output
+fprintf('section 2A finished.\n\n')
 
 %% 3) ratings group statistics
 % ----- section input -----
 params.stimulus = {'laser' 'RFS'};
 params.intensity = {'high' 'low'};
-params.outliers = [3, 16];
+params.subjects2remove = [3, 16];
 % -------------------------
 fprintf('section 3: group statistics - ratings\n')
 
 % define subject filter
 params.subjects = length(RFSxLASER_info);
 subject_filter = logical(ones(1, params.subjects)); 
-subject_filter(params.outliers) = false;
+subject_filter(params.subjects2remove) = false;
 
 % calculate group statistics
 row_counter = 1;
@@ -2436,7 +2719,7 @@ params.prefix = 'N1_ready';
 params.stimulus = {'laser' 'RFS'};
 params.ERP_measures = {'N1_latency' 'N1_amplitude'};
 params.search_window = [0.05 0.3];
-params.outliers = [16];
+params.subjects2remove = [3, 16];
 % -------------------------
 fprintf('section 4: ERP - N1 evaluation\n')
 
@@ -2446,7 +2729,7 @@ dataset = RFSxLASER_data.flipped_N1;
 % define subject filter
 params.subjects = length(RFSxLASER_info);
 subject_filter = logical(ones(1, params.subjects)); 
-subject_filter(params.outliers) = false;
+subject_filter(params.subjects2remove) = false;
 
 % define common visualization & stats parameters
 data2load = dir(sprintf('%s\\%s*%s*', folder.processed, params.prefix));
