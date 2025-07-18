@@ -2397,6 +2397,7 @@ for a = 1:length(params.stimulus)
         end
     end
 end
+RFSxLASER_measures.ttest_side.ERP = ttest_side;
 
 %% plot boxplots for group statistics
 for b = 1:length(params.intensity)
