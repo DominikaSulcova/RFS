@@ -2399,73 +2399,188 @@ for a = 1:length(params.stimulus)
 end
 RFSxLASER_measures.ttest_side.ERP = ttest_side;
 
-%% plot boxplots for group statistics
+% plot boxplots for group statistics (merged)
 for b = 1:length(params.intensity)
-    for c = 1:length(params.ERP_measures)
+    for d = 1:length(params.ERP_measures)
         % extract the data
         data = [];
         for s = 1:params.subjects
-            statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.laser.%s.%s];', params.intensity{b}, params.ERP_measures{c});
-            eval(statement)
-            statement = sprintf('data(params.subjects + s) = [RFSxLASER_measures.merged.individual(s).ERP.RFS.%s.%s];', params.intensity{b}, params.ERP_measures{c});
-            eval(statement)
+            if subject_filter(s)
+                % laser data
+                data_side = [];
+                for c = 1:length(params.side)
+                    data_side(c) = RFSxLASER_measures.individual(s).ERP.laser.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
+                end
+                data(s) = mean(data_side);
+
+                % RFS data
+                data_side = [];
+                for c = 1:length(params.side)
+                    data_side(c) = RFSxLASER_measures.individual(s).ERP.RFS.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
+                end
+                data(params.subjects + s) = mean(data_side);
+            end
         end
         visual.data = data([subject_filter, subject_filter])';
 
         % plot the boxplot
         visual.group = [ones(sum(subject_filter), 1); 2*ones(sum(subject_filter), 1)];
         figure(figure_counter)
-        if contains(params.ERP_measures{c}, 'latency')    
-            if contains(params.ERP_measures{c}, 'N2')  
-                plot_box(visual, 'orientation', 'horizontal', 'xlim', [0.1 0.25], 'xlabel', 'time (s)')
-            elseif contains(params.ERP_measures{c}, 'P2')
-                plot_box(visual, 'orientation', 'horizontal', 'xlim', [0.18 0.48], 'xlabel', 'time (s)')
-            end
-        elseif contains(params.ERP_measures{c}, 'amplitude')
+        if contains(params.ERP_measures{d}, 'latency')    
+            plot_box(visual, 'orientation', 'horizontal', 'xlim', [0 0.7], 'xlabel', 'time (s)')
+            % if contains(params.ERP_measures{d}, 'N2')  
+            %     plot_box(visual, 'orientation', 'horizontal', 'xlim', [0 0.4], 'xlabel', 'time (s)')
+            % elseif contains(params.ERP_measures{d}, 'P2')
+            %     plot_box(visual, 'orientation', 'horizontal', 'xlim', [0.15 0.55], 'xlabel', 'time (s)')
+            % end
+        elseif contains(params.ERP_measures{d}, 'amplitude')
             plot_box(visual, 'ylabel', 'amplitude (\muV)')
         end
-        title(sprintf('%s stimulation intensity - %s',  params.intensity{b}, strrep(params.ERP_measures{c}, '_', ' ')))
+        title(sprintf('%s stimulation intensity - %s',  params.intensity{b}, strrep(params.ERP_measures{d}, '_', ' ')))
 
         % save and update counter
-        saveas(gcf, sprintf('%s\\figures\\preliminary_box_%s_%s.png', folder.output, params.intensity{b}, params.ERP_measures{c}))
+        saveas(gcf, sprintf('%s\\figures\\final\\merged_box_%s_%s.png', folder.output, params.intensity{b}, params.ERP_measures{d}))
         figure_counter = figure_counter + 1;
     end
 end
 
-% paired t-test for high intensity stimulaiton
-for c = 1:length(params.ERP_measures)
-    % extract laser data
-    data = [];
-    for s = 1:params.subjects
-        statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.laser.high.%s];', params.ERP_measures{c});
-        eval(statement)                
+% identify outliers for visual inspection and manual extraction
+params.search.stimulus = 'RFS';
+params.search.intensity = 'high';
+params.search.measure = 'N2_latency';
+params.search.threshold = 0.3;
+outliers = struct([]);
+for s = 1:params.subjects
+    if subject_filter(s)
+        for c = 1:length(params.side)
+            % read data
+            value = RFSxLASER_measures.individual(s).ERP.(params.search.stimulus).(params.search.intensity).(params.side{c}).(params.search.measure);
+        
+            % encode if above threshold
+            if value > params.search.threshold
+                outliers(end + 1).subject = s;
+                outliers(end).stimulus = params.search.stimulus;
+                outliers(end).intensity = params.search.intensity;
+                outliers(end).side = params.side{c};
+                outliers(end).(params.search.measure) = value;
+            end
+        end       
     end
-    data_all(1, :) = data(subject_filter);
-
-    % extract laser data
-    data = [];
-    for s = 1:params.subjects
-        statement = sprintf('data(s) = [RFSxLASER_measures.merged.individual(s).ERP.RFS.high.%s];', params.ERP_measures{c});
-        eval(statement)                
-    end
-    data_all(2, :) = data(subject_filter);
-
-    % run the paired t-test
-    fprintf('%s:\n', strrep(params.ERP_measures{c}, '_', ' '))
-    output = paired_t(data_all);
-
-    % append the output
-    statement = sprintf('ttest.%s = output;', params.ERP_measures{c});
-    eval(statement)
-    fprintf('\n')
 end
-RFSxLASER_measures.group_stats.ERP(1).ttest = ttest;
+RFSxLASER_measures.outliers = outliers;
+addpath(genpath([folder.toolbox '\letswave 7']));
+letswave
+
+% paired t-test (merged)
+for b = 1:length(params.intensity)
+    for d = 1:length(params.ERP_measures)
+        % extract the data
+        data = [];
+        for s = 1:params.subjects
+            if subject_filter(s)
+                % laser data
+                data_side = [];
+                for c = 1:length(params.side)
+                    data_side(c) = RFSxLASER_measures.individual(s).ERP.laser.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
+                end
+                data(1, s) = mean(data_side);
+
+                % RFS data
+                data_side = [];
+                for c = 1:length(params.side)
+                    if ~(strcmp(params.intensity{b}, params.search.intensity) && any(strcmp({outliers.side}, params.side{c})) && any([outliers.subject] == s))
+                        data_side(c) = RFSxLASER_measures.individual(s).ERP.RFS.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});  
+                    end
+                end
+                if any(data_side == 0)
+                    data_side(data_side == 0) = [];
+                end
+                data(2, s) = mean(data_side);
+            end
+        end
+        data = data(:, subject_filter);
+    
+        % run the paired t-test
+        fprintf('%s intensity - %s:\n', params.intensity{b}, strrep(params.ERP_measures{d}, '_', ' '))
+        output = paired_t(data);
+    
+        % append the output
+        ttest.(params.intensity{b}).(params.ERP_measures{d}) = output;
+        fprintf('\n')
+    end
+end
+RFSxLASER_measures.ttest.ERP = ttest;
+
+% check if the output table already exists
+output_variables = who('-file', output_file);
+if ismember('RFSxLASER_export', output_variables)
+    load(output_file, 'RFSxLASER_export');    
+else
+    RFSxLASER_export = table;
+end
+
+% save into a long-format table for LMMs in R
+fprintf('exporting peak measures to a table ...\n')
+row_counter = height(RFSxLASER_export) + 1;
+params.search.side = 'right';
+for s = 1:params.subjects
+    % make sure to only export valid subjects
+    if subject_filter(s)
+
+        % cycle through conditions
+        for a = 1:length(params.stimulus)
+            for b = 1:length(params.intensity)
+                for c = 1:length(params.side)
+                    % subject information 
+                    RFSxLASER_export.subject(row_counter) = s;
+                    RFSxLASER_export.ID{row_counter} = RFSxLASER_info(s).ID;
+                    RFSxLASER_export.age(row_counter) = RFSxLASER_info(s).age;
+                    RFSxLASER_export.male(row_counter) = RFSxLASER_info(s).male;
+                    RFSxLASER_export.handedness(row_counter) = RFSxLASER_info(s).handedness; 
+                    RFSxLASER_export.height(row_counter) = RFSxLASER_info(s).body.height;
+                    RFSxLASER_export.weight(row_counter) = RFSxLASER_info(s).body.weight;
+                    if strcmp(params.side{c}, 'right')
+                        RFSxLASER_export.limb_length(row_counter) = RFSxLASER_info(s).body.arm_right;
+                    else
+                        RFSxLASER_export.limb_length(row_counter) = RFSxLASER_info(s).body.arm_left;
+                    end
+
+                    % ERP conditions
+                    RFSxLASER_export.stimulus{row_counter} = params.stimulus{a};
+                    RFSxLASER_export.intensity{row_counter} = params.intensity{b};
+                    RFSxLASER_export.side{row_counter} = params.side{c};
+
+                    % ERP measures
+                    for d = 1:length(params.ERP_measures)
+                        RFSxLASER_export.(params.ERP_measures{d})(row_counter) = ...
+                            RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});   
+                    end
+
+                    % update row counter
+                    row_counter = row_counter + 1;
+                end
+            end
+        end
+    end
+end
+fprintf('done.\n')
+
+% replace outlier measures with NaN
+for e = 1:height(RFSxLASER_export)
+    if any([outliers.subject] == RFSxLASER_export.subject(e)) && ...
+        strcmp(RFSxLASER_export.stimulus{e}, params.search.stimulus) && ...
+        strcmp(RFSxLASER_export.intensity{e}, params.search.intensity) && ...
+        strcmp(RFSxLASER_export.side{e}, params.search.side) 
+        RFSxLASER_export.(params.search.measure)(e) = NaN;
+    end
+end
 
 % save and continue
-save(output_file, 'RFSxLASER_measures', '-append')
-clear a b c s dataset data2load header data visual t_value fig statement screen_size search_window ttest subject_filter ...
-    idx N2_amplitude N2_latency P2_amplitude P2_latency row_counter N2_idx P2_idx group fig data_all output
-fprintf('section 2A finished.\n\n')
+save(output_file, 'RFSxLASER_measures', 'RFSxLASER_export', '-append')
+clear a b c d e s dataset data2load header data visual t_value fig statement screen_size search_window ttest subject_filter ...
+    idx N2_amplitude N2_latency P2_amplitude P2_latency row_counter N2_idx P2_idx ...
+    group fig data_all output value outliers data_side output_variables
+fprintf('section 2 finished.\n\n')
 
 %% 3) ratings group statistics
 % ----- section input -----
