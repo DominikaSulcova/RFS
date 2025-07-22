@@ -2124,12 +2124,13 @@ fprintf('section 1 finished.\n\n')
 %% 2) N2P2 ERP visualization and peak measure extraction 
 % ----- section input -----
 params.eoi = 'Cz';
-params.prefix = 'N1_ready';
+params.prefix = 'avg bl N1_ready';
 params.stimulus = {'laser' 'RFS'};
 params.intensity = {'high' 'low'};
 params.side = {'right' 'left'};
 params.ERP_measures = {'N2_latency' 'N2_amplitude' 'P2_latency' 'P2_amplitude'};
-params.search_window = [0.05 0.75];
+params.search_window.N2 = [0.05 0.4];
+params.search_window.P2 = [0.15 0.7];
 params.subjects2remove = [3, 16];
 % -------------------------
 fprintf('section 2: group statistics - ERP\n')
@@ -2210,7 +2211,6 @@ for b = 1:length(params.intensity)
 end
 
 % plot topographies at group average peak latencies, save average values
-search_window = find(visual.x >= params.search_window(1) & visual.x <= params.search_window(2));
 addpath(genpath([folder.toolbox '\letswave 6']));
 dataset = RFSxLASER_data.original;
 for a = 1:length(params.stimulus)
@@ -2273,14 +2273,16 @@ for a = 1:length(params.stimulus)
 
                     % select data
                     data = squeeze(dataset.(params.stimulus{a}).(params.intensity{b}).(params.side{c})(s, visual.eoi, :))';
-        
+       
                     % extract N2 measures
+                    search_window = find(visual.x >= params.search_window.N2(1) & visual.x <= params.search_window.N2(2));
                     [N2_amplitude, idx] = min(data(search_window));
-                    N2_latency = params.search_window(1) + idx*header.xstep;
+                    N2_latency = params.search_window.N2(1) + idx*header.xstep;
         
                     % extract P2 measures
+                    search_window = find(visual.x >= params.search_window.P2(1) & visual.x <= params.search_window.P2(2));
                     [P2_amplitude, idx] = max(data(search_window));
-                    P2_latency = params.search_window(1) + idx*header.xstep;
+                    P2_latency = params.search_window.P2(1) + idx*header.xstep;
         
                     % encode measures
                     RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).N2_amplitude = N2_amplitude;
@@ -2293,6 +2295,116 @@ for a = 1:length(params.stimulus)
     end
 end
 
+% plot boxplots for group statistics (merged)
+for b = 1:length(params.intensity)
+    for d = 1:length(params.ERP_measures)
+        % extract the data
+        data = [];
+        for s = 1:params.subjects
+            if subject_filter(s)
+                % laser data
+                data_side = [];
+                for c = 1:length(params.side)
+                    data_side(c) = RFSxLASER_measures.individual(s).ERP.laser.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
+                end
+                data(s) = mean(data_side);
+
+                % RFS data
+                data_side = [];
+                for c = 1:length(params.side)
+                    data_side(c) = RFSxLASER_measures.individual(s).ERP.RFS.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
+                end
+                data(params.subjects + s) = mean(data_side);
+            end
+        end
+        visual.data = data([subject_filter, subject_filter])';
+
+        % plot the boxplot
+        visual.group = [ones(sum(subject_filter), 1); 2*ones(sum(subject_filter), 1)];
+        figure(figure_counter)
+        if contains(params.ERP_measures{d}, 'latency')    
+            plot_box(visual, 'orientation', 'horizontal', 'xlim', [0 0.7], 'xlabel', 'time (s)')
+        elseif contains(params.ERP_measures{d}, 'amplitude')
+            plot_box(visual, 'ylabel', 'amplitude (\muV)')
+        end
+        title(sprintf('%s stimulation intensity - %s',  params.intensity{b}, strrep(params.ERP_measures{d}, '_', ' ')))
+
+        % save and update counter
+        saveas(gcf, sprintf('%s\\figures\\final\\merged_box_%s_%s.png', folder.output, params.intensity{b}, params.ERP_measures{d}))
+        figure_counter = figure_counter + 1;
+    end
+end
+
+% check for outlier latencies
+params.search.measure = {'N2_latency' 'P2_latency'};
+params.search.N2.laser = [0.1 0.3];
+params.search.N2.RFS = [0.05 0.3]; 
+params.search.P2.laser = [0.15 0.5];
+params.search.P2.RFS = [0.15 0.5]; 
+outliers = struct([]);
+for d = 1:length(params.search.measure)
+    for s = 1:params.subjects
+        if subject_filter(s)
+            for a = 1:length(params.stimulus)
+                for b = 1:length(params.intensity)
+                    for c = 1:length(params.side)  
+                        % determine thresholds
+                        if strcmp(params.search.measure{d}, 'N2_latency')
+                            threshold = params.search.N2.(params.stimulus{a});
+                        elseif strcmp(params.search.measure{d}, 'P2_latency')
+                            threshold = params.search.P2.(params.stimulus{a});
+                        end
+
+                        % read data
+                        value = RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).(params.search.measure{d});
+                    
+                        % encode if outdside of thresholds
+                        if value < threshold(1) || value > threshold(2)
+                            outliers(end + 1).subject = s;
+                            outliers(end).stimulus = params.stimulus{a};
+                            outliers(end).intensity = params.intensity{b};
+                            outliers(end).side = params.side{c};
+                            outliers(end).(params.search.measure{d}) = value;
+                        end
+                    end
+                end
+            end
+        end       
+    end
+end
+
+% check for incongruent latencies
+value = [];
+incongruent = struct([]);
+for s = 1:params.subjects
+    if subject_filter(s)
+        for a = 1:length(params.stimulus)
+            for b = 1:length(params.intensity)
+                for c = 1:length(params.side)  
+                    % read data
+                    value.N2 = RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).N2_latency;
+                    value.P2 = RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).P2_latency;
+                
+                    % encode if outdside of thresholds
+                    if value.P2 < value.N2
+                        incongruent(end + 1).subject = s;
+                        incongruent(end).stimulus = params.stimulus{a};
+                        incongruent(end).intensity = params.intensity{b};
+                        incongruent(end).side = params.side{c};
+                        incongruent(end).N2_latency = value.N2;
+                        incongruent(end).P2_latency = value.P2;
+                    end
+                end
+            end
+        end
+    end       
+end
+
+% save after visual inspection
+addpath(genpath([folder.toolbox '\letswave 7']));
+letswave
+RFSxLASER_measures.outliers = outliers;
+
 % calculate group statistics for each side of stimulation
 row_counter = 1;
 for a = 1:length(params.stimulus)
@@ -2303,23 +2415,47 @@ for a = 1:length(params.stimulus)
                 data = [];
                 for s = 1:params.subjects
                     if subject_filter(s)
-                        data(s) = [RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).(params.ERP_measures{d})];      
+                        % check for outliers
+                        outlier = false;
+                        for o = 1:length(outliers)
+                            if outliers(o).subject == s
+                                if strcmp(outliers(o).stimulus, params.stimulus{a})
+                                    if strcmp(outliers(o).intensity, params.intensity{b})
+                                        if strcmp(outliers(o).side, params.side{c})
+                                            for p = 1:length(outliers(o).component)
+                                                if contains(params.ERP_measures{d}, outliers(o).component{p})
+                                                    outlier = true;
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+
+                        % extract data
+                        if ~outlier
+                            data(s) = [RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).(params.ERP_measures{d})];   
+                        else
+                            data(s) = NaN;
+                        end
                     end
                 end
                 data = data(subject_filter);
-    
+                   
                 % calculate the stats
+                t_value = tinv(0.975, sum(~isnan(data)) - 1); 
                 RFSxLASER_measures.group.side.ERP(row_counter).stimulus = params.stimulus{a}; 
                 RFSxLASER_measures.group.side.ERP(row_counter).intensity = params.intensity{b};
                 RFSxLASER_measures.group.side.ERP(row_counter).side = params.side{c};
                 RFSxLASER_measures.group.side.ERP(row_counter).measure = params.ERP_measures{d};
-                RFSxLASER_measures.group.side.ERP(row_counter).mean = mean(data);
+                RFSxLASER_measures.group.side.ERP(row_counter).mean = mean(data, 'omitnan');
                 RFSxLASER_measures.group.side.ERP(row_counter).min = min(data);
                 RFSxLASER_measures.group.side.ERP(row_counter).max = max(data);
-                RFSxLASER_measures.group.side.ERP(row_counter).SD = std(data);
-                RFSxLASER_measures.group.side.ERP(row_counter).SEM = std(data) / sqrt(sum(subject_filter)); 
-                RFSxLASER_measures.group.side.ERP(row_counter).CI_upper = mean(data) + t_value * RFSxLASER_measures.group.side.ERP(row_counter).SEM; 
-                RFSxLASER_measures.group.side.ERP(row_counter).CI_lower = mean(data) - t_value * RFSxLASER_measures.group.side.ERP(row_counter).SEM;
+                RFSxLASER_measures.group.side.ERP(row_counter).SD = std(data, 'omitnan');
+                RFSxLASER_measures.group.side.ERP(row_counter).SEM = std(data, 'omitnan') / sqrt(sum(~isnan(data))); 
+                RFSxLASER_measures.group.side.ERP(row_counter).CI_upper = mean(data, 'omitnan') + t_value * RFSxLASER_measures.group.side.ERP(row_counter).SEM; 
+                RFSxLASER_measures.group.side.ERP(row_counter).CI_lower = mean(data, 'omitnan') - t_value * RFSxLASER_measures.group.side.ERP(row_counter).SEM;
     
                 % update row counter
                 row_counter = row_counter + 1;
@@ -2328,7 +2464,8 @@ for a = 1:length(params.stimulus)
     end
 end
 
-% calculate group statistics while merged data from both sides
+% calculate group statistics while merging data from both sides
+t_value = tinv(0.975, sum(subject_filter) - 1); 
 row_counter = 1;
 for a = 1:length(params.stimulus)
     for b = 1:length(params.intensity)
@@ -2339,9 +2476,32 @@ for a = 1:length(params.stimulus)
                 if subject_filter(s)
                     data_side = [];
                     for c = 1:length(params.side)
-                        data_side(c) = [RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).(params.ERP_measures{d})];      
+                        % check for outliers
+                        outlier = false;
+                        for o = 1:length(outliers)
+                            if outliers(o).subject == s
+                                if strcmp(outliers(o).stimulus, params.stimulus{a})
+                                    if strcmp(outliers(o).intensity, params.intensity{b})
+                                        if strcmp(outliers(o).side, params.side{c})
+                                            for p = 1:length(outliers(o).component)
+                                                if contains(params.ERP_measures{d}, outliers(o).component{p})
+                                                    outlier = true;
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+
+                        % extract
+                        if ~outlier
+                            data_side(c) = RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});   
+                        else
+                            data_side(c) = NaN;
+                        end
                     end
-                    data(s) = mean(data_side);
+                    data(s) = mean(data_side, 'omitnan');
                 end
             end
             data = data(subject_filter);          
@@ -2399,78 +2559,6 @@ for a = 1:length(params.stimulus)
 end
 RFSxLASER_measures.ttest_side.ERP = ttest_side;
 
-% plot boxplots for group statistics (merged)
-for b = 1:length(params.intensity)
-    for d = 1:length(params.ERP_measures)
-        % extract the data
-        data = [];
-        for s = 1:params.subjects
-            if subject_filter(s)
-                % laser data
-                data_side = [];
-                for c = 1:length(params.side)
-                    data_side(c) = RFSxLASER_measures.individual(s).ERP.laser.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
-                end
-                data(s) = mean(data_side);
-
-                % RFS data
-                data_side = [];
-                for c = 1:length(params.side)
-                    data_side(c) = RFSxLASER_measures.individual(s).ERP.RFS.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
-                end
-                data(params.subjects + s) = mean(data_side);
-            end
-        end
-        visual.data = data([subject_filter, subject_filter])';
-
-        % plot the boxplot
-        visual.group = [ones(sum(subject_filter), 1); 2*ones(sum(subject_filter), 1)];
-        figure(figure_counter)
-        if contains(params.ERP_measures{d}, 'latency')    
-            plot_box(visual, 'orientation', 'horizontal', 'xlim', [0 0.7], 'xlabel', 'time (s)')
-            % if contains(params.ERP_measures{d}, 'N2')  
-            %     plot_box(visual, 'orientation', 'horizontal', 'xlim', [0 0.4], 'xlabel', 'time (s)')
-            % elseif contains(params.ERP_measures{d}, 'P2')
-            %     plot_box(visual, 'orientation', 'horizontal', 'xlim', [0.15 0.55], 'xlabel', 'time (s)')
-            % end
-        elseif contains(params.ERP_measures{d}, 'amplitude')
-            plot_box(visual, 'ylabel', 'amplitude (\muV)')
-        end
-        title(sprintf('%s stimulation intensity - %s',  params.intensity{b}, strrep(params.ERP_measures{d}, '_', ' ')))
-
-        % save and update counter
-        saveas(gcf, sprintf('%s\\figures\\final\\merged_box_%s_%s.png', folder.output, params.intensity{b}, params.ERP_measures{d}))
-        figure_counter = figure_counter + 1;
-    end
-end
-
-% identify outliers for visual inspection and manual extraction
-params.search.stimulus = 'RFS';
-params.search.intensity = 'high';
-params.search.measure = 'N2_latency';
-params.search.threshold = 0.3;
-outliers = struct([]);
-for s = 1:params.subjects
-    if subject_filter(s)
-        for c = 1:length(params.side)
-            % read data
-            value = RFSxLASER_measures.individual(s).ERP.(params.search.stimulus).(params.search.intensity).(params.side{c}).(params.search.measure);
-        
-            % encode if above threshold
-            if value > params.search.threshold
-                outliers(end + 1).subject = s;
-                outliers(end).stimulus = params.search.stimulus;
-                outliers(end).intensity = params.search.intensity;
-                outliers(end).side = params.side{c};
-                outliers(end).(params.search.measure) = value;
-            end
-        end       
-    end
-end
-RFSxLASER_measures.outliers = outliers;
-addpath(genpath([folder.toolbox '\letswave 7']));
-letswave
-
 % paired t-test (merged)
 for b = 1:length(params.intensity)
     for d = 1:length(params.ERP_measures)
@@ -2481,21 +2569,62 @@ for b = 1:length(params.intensity)
                 % laser data
                 data_side = [];
                 for c = 1:length(params.side)
-                    data_side(c) = RFSxLASER_measures.individual(s).ERP.laser.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
+                    % check for outliers
+                    outlier = false;
+                    for o = 1:length(outliers)
+                        if outliers(o).subject == s
+                            if strcmp(outliers(o).stimulus, 'laser')
+                                if strcmp(outliers(o).intensity, params.intensity{b})
+                                    if strcmp(outliers(o).side, params.side{c})
+                                        for p = 1:length(outliers(o).component)
+                                            if contains(params.ERP_measures{d}, outliers(o).component{p})
+                                                outlier = true;
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    % extract
+                    if ~outlier
+                        data_side(c) = RFSxLASER_measures.individual(s).ERP.laser.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});   
+                    else
+                        data_side(c) = NaN;
+                    end
                 end
-                data(1, s) = mean(data_side);
+                data(1, s) = mean(data_side, 'omitnan');
 
                 % RFS data
                 data_side = [];
                 for c = 1:length(params.side)
-                    if ~(strcmp(params.intensity{b}, params.search.intensity) && any(strcmp({outliers.side}, params.side{c})) && any([outliers.subject] == s))
-                        data_side(c) = RFSxLASER_measures.individual(s).ERP.RFS.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});  
+                    % check for outliers
+                    outlier = false;
+                    for o = 1:length(outliers)
+                        if outliers(o).subject == s
+                            if strcmp(outliers(o).stimulus, 'RFS')
+                                if strcmp(outliers(o).intensity, params.intensity{b})
+                                    if strcmp(outliers(o).side, params.side{c})
+                                        for p = 1:length(outliers(o).component)
+                                            if contains(params.ERP_measures{d}, outliers(o).component{p})
+                                                outlier = true;
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    % extract
+                    if ~outlier
+                        data_side(c) = RFSxLASER_measures.individual(s).ERP.RFS.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});   
+                    else
+                        data_side(c) = NaN;
                     end
                 end
-                if any(data_side == 0)
-                    data_side(data_side == 0) = [];
-                end
-                data(2, s) = mean(data_side);
+                data(2, s) = mean(data_side, 'omitnan');
             end
         end
         data = data(:, subject_filter);
@@ -2567,22 +2696,154 @@ fprintf('done.\n')
 
 % replace outlier measures with NaN
 for e = 1:height(RFSxLASER_export)
-    if any([outliers.subject] == RFSxLASER_export.subject(e)) && ...
-        strcmp(RFSxLASER_export.stimulus{e}, params.search.stimulus) && ...
-        strcmp(RFSxLASER_export.intensity{e}, params.search.intensity) && ...
-        strcmp(RFSxLASER_export.side{e}, params.search.side) 
-        RFSxLASER_export.(params.search.measure)(e) = NaN;
+    for o = 1:length(outliers)
+        if outliers(o).subject == RFSxLASER_export.subject(e)
+            if strcmp(outliers(o).stimulus, RFSxLASER_export.stimulus{e})
+                if strcmp(outliers(o).intensity, RFSxLASER_export.intensity{e})
+                    if strcmp(outliers(o).side, RFSxLASER_export.side{e})
+                        for p = 1:length(outliers(o).component)
+                            measures = params.ERP_measures(contains(params.ERP_measures, outliers(o).component{p}));
+                            for m = 1:length(measures)
+                                RFSxLASER_export.(measures{m})(e) = NaN;
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
 end
 
 % save and continue
 save(output_file, 'RFSxLASER_measures', 'RFSxLASER_export', '-append')
-clear a b c d e s dataset data2load header data visual t_value fig statement screen_size search_window ttest subject_filter ...
-    idx N2_amplitude N2_latency P2_amplitude P2_latency row_counter N2_idx P2_idx ...
-    group fig data_all output value outliers data_side output_variables
+clear a b c d e m o p s dataset data2load header data visual t_value fig statement screen_size search_window ttest subject_filter ...
+    idx N2_amplitude N2_latency P2_amplitude P2_latency row_counter N2_idx P2_idx incongruent measures outlier threshold ...
+    group fig data_all output value outliers data_side output_variables ttest_side
 fprintf('section 2 finished.\n\n')
 
-%% 3) ratings group statistics
+%% 3) N1 ERP visualization and peak measure extraction 
+% ----- section input -----
+params.eoi = {'C3' 'C4'};
+params.prefix = 'N1_ready';
+params.stimulus = {'laser' 'RFS'};
+params.intensity = {'high' 'low'};
+params.side = {'right' 'left'};
+params.ERP_measures = {'N1_latency' 'N1_amplitude'};
+params.search_window = [0 0.3];
+params.subjects2remove = [3, 16];
+% -------------------------
+fprintf('section 2: group statistics - ERP\n')
+
+% define subject filter
+params.subjects = length(RFSxLASER_info);
+subject_filter = logical(ones(1, params.subjects)); 
+subject_filter(params.subjects2remove) = false;
+
+% define common visualization & stats parameters
+data2load = dir(sprintf('%s\\%s*%s*', folder.processed, params.prefix));
+load(sprintf('%s\\%s', data2load(1).folder, data2load(1).name), '-mat')
+t_value = tinv(0.975, sum(subject_filter) - 1); 
+visual.x = (0:header.datasize(6)-1)*header.xstep + header.xstart;
+visual.labels = params.stimulus;
+visual.chanlocs = header.chanlocs;
+visual.chanlabels = {header.chanlocs.labels};
+visual.colors = [0.3333    0.4471    0.9020;
+    1.0000    0.0745    0.6510];
+screen_size = get(0, 'ScreenSize');
+search_window = find(visual.x >= params.search_window(1) & visual.x <= params.search_window(2));
+
+% identify EOIs
+for e = 1:length(params.eoi)
+    params.eoi_n(e) = find(strcmp(visual.chanlabels, params.eoi{e}));
+end
+
+% extract N1 peak amplitudes and latencies
+dataset = RFSxLASER_data.original_N1;
+data2check = struct([]);
+for a = 1:length(params.stimulus)
+    for b = 1:length(params.intensity)
+        for c = 1:length(params.side)
+            for s = 1:params.subjects
+                if subject_filter(s)
+                    % select data
+                    if strcmp(params.side{c}, 'right')
+                        visual.eoi = params.eoi_n(1);
+                    elseif strcmp(params.side{c}, 'left')
+                        visual.eoi = params.eoi_n(2);
+                    end
+                    data = squeeze(dataset.(params.stimulus{a}).(params.intensity{b}).(params.side{c})(s, visual.eoi, :))';
+        
+                    % extract N1 measures
+                    [N1_amplitude, idx] = min(data(search_window));
+                    N1_latency = params.search_window(1) + idx*header.xstep;
+        
+                    % encode measures
+                    RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).N1_amplitude = N1_amplitude;
+                    RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).N1_latency = N1_latency;
+
+                    % check if N1 precedes N2
+                    N2_latency = RFSxLASER_measures.individual(s).ERP.(params.stimulus{a}).(params.intensity{b}).(params.side{c}).N2_latency;
+                    if N1_latency > N2_latency
+                        data2check(end + 1).subject = s;
+                        data2check(end).stimulus = params.stimulus{a};
+                        data2check(end).intensity = params.intensity{b};
+                        data2check(end).side = params.side{c};
+                        data2check(end).N1_latency = N1_latency;
+                        data2check(end).N2_latency = N2_latency;
+                    end
+                end
+            end
+        end
+    end
+end
+
+% check for incongruent latencies
+[~, idx] = sort([data2check.subject]);
+data2check = data2check(idx);
+
+% plot boxplots for group statistics (merged)
+for b = 1:length(params.intensity)
+    for d = 1:length(params.ERP_measures)
+        % extract the data
+        data = [];
+        for s = 1:params.subjects
+            if subject_filter(s)
+                % laser data
+                data_side = [];
+                for c = 1:length(params.side)
+                    data_side(c) = RFSxLASER_measures.individual(s).ERP.laser.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
+                end
+                data(s) = mean(data_side);
+
+                % RFS data
+                data_side = [];
+                for c = 1:length(params.side)
+                    data_side(c) = RFSxLASER_measures.individual(s).ERP.RFS.(params.intensity{b}).(params.side{c}).(params.ERP_measures{d});      
+                end
+                data(params.subjects + s) = mean(data_side);
+            end
+        end
+        visual.data = data([subject_filter, subject_filter])';
+
+        % plot the boxplot
+        visual.group = [ones(sum(subject_filter), 1); 2*ones(sum(subject_filter), 1)];
+        figure(figure_counter)
+        if contains(params.ERP_measures{d}, 'latency')    
+            plot_box(visual, 'orientation', 'horizontal', 'xlim', [0 0.7], 'xlabel', 'time (s)')
+        elseif contains(params.ERP_measures{d}, 'amplitude')
+            plot_box(visual, 'ylabel', 'amplitude (\muV)')
+        end
+        title(sprintf('%s stimulation intensity - %s',  params.intensity{b}, strrep(params.ERP_measures{d}, '_', ' ')))
+
+        % save and update counter
+        saveas(gcf, sprintf('%s\\figures\\final\\merged_box_%s_%s.png', folder.output, params.intensity{b}, params.ERP_measures{d}))
+        figure_counter = figure_counter + 1;
+    end
+end
+
+
+
+%% 4) ratings group statistics
 % ----- section input -----
 params.stimulus = {'laser' 'RFS'};
 params.intensity = {'high' 'low'};
@@ -2660,7 +2921,7 @@ save(output_file, 'RFSxLASER_measures', '-append')
 clear a b c s r subject_filter row_counter row data data_subj data_ttest output statement ttest t_value
 fprintf('section 3 finished.\n\n')
 
-%% 4) N1 ERP visualization and peak measure extraction
+%% 3) N1 ERP visualization and peak measure extraction
 % ----- section input -----
 params.eoi = 'C3';
 params.prefix = 'N1_ready';
